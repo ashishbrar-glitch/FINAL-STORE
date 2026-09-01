@@ -1,0 +1,6 @@
+{
+  "name": "BCN Store",
+  "description": "Your village store, now in your pocket. Order groceries or book a library seat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

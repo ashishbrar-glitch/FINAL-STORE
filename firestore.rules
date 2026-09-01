@@ -1,0 +1,108 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // --------------------------------------------------------------------------
+    // GLOBAL HELPERS
+    // --------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isSuperAdmin() {
+      return true; // Demo mode: bypass auth
+    }
+
+    function isAdmin() {
+      return true; // Demo mode: bypass auth
+    }
+
+    function isManager() {
+      return true; // Demo mode: bypass auth
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --------------------------------------------------------------------------
+    // VALIDATION HELPERS
+    // --------------------------------------------------------------------------
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role'])
+          && data.email is string && data.email.size() > 0 && data.email.size() <= 200
+          && data.role is string && (data.role == 'superadmin' || data.role == 'admin' || data.role == 'manager' || data.role == 'customer');
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['nameEn', 'nameHi', 'displayOrder', 'isActive'])
+          && data.nameEn is string && data.nameEn.size() <= 100
+          && data.nameHi is string && data.nameHi.size() <= 100
+          && data.displayOrder is number
+          && data.isActive is bool;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'price', 'categoryId', 'isActive', 'isAvailable'])
+          && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+          && data.price is number && data.price >= 0
+          && data.categoryId is string && data.categoryId.size() > 0
+          && data.isActive is bool
+          && data.isAvailable is bool;
+    }
+    
+    function isValidSeat(data) {
+      return data.keys().hasAll(['isOccupied', 'updatedAt'])
+          && data.isOccupied is bool
+          && data.updatedAt == request.time;
+    }
+
+    // --------------------------------------------------------------------------
+    // CATCH ALL (DEFAULT DENY)
+    // --------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --------------------------------------------------------------------------
+    // COLLECTIONS
+    // --------------------------------------------------------------------------
+    
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+    
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
+      allow update: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
+      allow delete: if isSuperAdmin() && isValidId(categoryId);
+    }
+    
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
+      allow update: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
+      allow delete: if isSuperAdmin() && isValidId(productId);
+    }
+
+    match /seats/{seatId} {
+      allow read: if true;
+      allow create: if isManager() && isValidId(seatId) && isValidSeat(incoming());
+      allow update: if isManager() && isValidId(seatId) && isValidSeat(incoming());
+      allow delete: if isSuperAdmin() && isValidId(seatId);
+    }
+  }
+}

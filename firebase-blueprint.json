@@ -1,0 +1,87 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["superadmin", "admin", "manager", "customer"] },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["email", "role"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product category",
+      "type": "object",
+      "properties": {
+        "nameEn": { "type": "string", "maxLength": 100 },
+        "nameHi": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "imageUrl": { "type": "string" },
+        "iconType": { "type": "string" },
+        "emoji": { "type": "string" },
+        "displayOrder": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["nameEn", "nameHi", "displayOrder", "isActive"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Store product",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 200 },
+        "nameHi": { "type": "string", "maxLength": 200 },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "subCategory": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "mrp": { "type": "number" },
+        "discount": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 50 },
+        "stockQuantity": { "type": "number" },
+        "isAvailable": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "imageUrl": { "type": "string" },
+        "isBestseller": { "type": "boolean" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["name", "price", "categoryId", "isActive", "isAvailable"]
+    },
+    "Seat": {
+      "title": "Seat",
+      "description": "Library seat allocation status",
+      "type": "object",
+      "properties": {
+        "isOccupied": { "type": "boolean" },
+        "allocatedTo": { "type": "string" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["isOccupied", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and RBAC"
+    },
+    "categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Product categories"
+    },
+    "products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Products available in the store"
+    },
+    "seats/{seatId}": {
+      "schema": { "$ref": "#/entities/Seat" },
+      "description": "Library seat reservations"
+    }
+  }
+}
