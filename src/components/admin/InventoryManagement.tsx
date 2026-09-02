@@ -6,7 +6,7 @@ import {
   getDocsFromCache,
   doc,
   setDoc,
-  deleteDoc,
+  deleteDoc, onSnapshot,
   query,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -27,6 +27,8 @@ export function InventoryManagement() {
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
@@ -43,12 +45,6 @@ export function InventoryManagement() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchProducts();
-    fetchCategories();
-  }, []);
-
-  
-  const fetchCategories = async () => {
     const processCategories = (snapshot: any) => {
       const catList = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       setCategories(catList);
@@ -56,53 +52,48 @@ export function InventoryManagement() {
         setCategory(catList[0].id);
       }
     };
-    try {
-      const snapshot = await getDocs(query(collection(db, "categories")));
+
+    const unsubCats = onSnapshot(query(collection(db, "categories")), (snapshot) => {
       processCategories(snapshot);
-    } catch (err: any) {
+    }, (err: any) => {
       if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Fetch categories error:', err);
       if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-        try {
-          const snapshot = await getDocsFromCache(query(collection(db, "categories")));
-          if (snapshot.empty) {
-            setError("Firebase Database quota exceeded for today. Please try again tomorrow.");
-          } else {
-            processCategories(snapshot);
-          }
-        } catch (e) { 
+        getDocsFromCache(query(collection(db, "categories"))).then((snapshot) => {
+          if (snapshot.empty) setError("Firebase Database quota exceeded for today. Please try again tomorrow.");
+          else processCategories(snapshot);
+        }).catch((e) => {
           console.error(e);
           setError("Database quota exceeded and no local cache available.");
-        }
+        });
       } else {
         setError(err.message);
       }
-    }
-  };
+    });
 
-  const fetchProducts = async () => {
     const processProducts = (snapshot: any) => {
-      const prodList = snapshot.docs.map((doc: any) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const prodList = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
       setProducts(prodList);
+      setLoading(false);
     };
-    try {
-      const q = query(collection(db, "products"));
-      const snapshot = await getDocs(q);
+
+    const unsubProds = onSnapshot(query(collection(db, "products")), (snapshot) => {
       processProducts(snapshot);
-    } catch (err: any) {
+    }, (err: any) => {
       if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Fetch products error:', err);
       if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-        try {
-          const snapshot = await getDocsFromCache(query(collection(db, "products")));
-          processProducts(snapshot);
-        } catch (e) { console.error(e); }
+        getDocsFromCache(query(collection(db, "products")))
+          .then(processProducts)
+          .catch(e => { console.error(e); setLoading(false); });
+      } else {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    });
+
+    return () => {
+      unsubCats();
+      unsubProds();
+    };
+  }, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -174,10 +165,10 @@ export function InventoryManagement() {
       alert(
         editingId ? "Item successfully updated!" : "Item successfully added!",
       );
-      fetchProducts();
+      
       resetForm();
     } catch (err: any) {
-      alert("Error saving product: " + err.message);
+      setActionError("Error saving: " + err.message);
     } finally {
       setActionLoading(false);
       setUploadStatus("");
@@ -185,12 +176,16 @@ export function InventoryManagement() {
   };
 
   const handleDeleteProduct = async (id: string) => {
-    if (!window.confirm("Delete this product?")) return;
+    setDeleteConfirmId(id);
+    return;
+  };
+
+  const executeDelete = async (id: string) => {
     try {
       await deleteDoc(doc(db, "products", id));
-      fetchProducts();
+      
     } catch (err: any) {
-      alert("Error deleting product: " + err.message);
+      setActionError("Error deleting: " + err.message);
     }
   };
 
@@ -378,6 +373,28 @@ export function InventoryManagement() {
           </div>
         )}
       </div>
-    </div>
+    
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900">Confirm Deletion</h3>
+            <p className="text-gray-600">Are you sure you want to delete this product?</p>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200">Cancel</button>
+              <button onClick={() => { executeDelete(deleteConfirmId); setDeleteConfirmId(null); }} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {actionError && (
+        <div className="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-4 rounded-xl shadow-lg flex justify-between items-center z-50">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="p-1 hover:bg-red-700 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+  
+</div>
   );
 }

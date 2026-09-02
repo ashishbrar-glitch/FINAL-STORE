@@ -42,7 +42,7 @@ import {
 import { AdminLogin } from "./components/AdminLogin";
 import { AdminDashboard } from "./components/AdminDashboard";
 import ScooterRider from "./components/ScooterRider";
-import { doc, getDoc, collection, getDocs, getDocsFromCache, setDoc, updateDoc, query, limit, startAfter, where } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, getDocsFromCache, setDoc, updateDoc, query, limit, startAfter, where, onSnapshot } from "firebase/firestore";
 import { db } from "./lib/firebase";
 import { AdminCategoryModal } from "./components/admin/AdminCategoryModal";
 import { AdminProductModal } from "./components/admin/AdminProductModal";
@@ -154,10 +154,13 @@ function MainContent() {
     }
   }, []);
 
-  // Fetch initial products and categories
-  const fetchData = async () => {
-    const processData = (catSnap: any, snapshot: any) => {
-      let catList = catSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Category));
+  useEffect(() => {
+    let currentCatSnap: any = null;
+    let currentProdSnap: any = null;
+
+    const processData = () => {
+      if (!currentCatSnap || !currentProdSnap) return;
+      let catList = currentCatSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() } as Category));
       catList.sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
       
       if (catList.length === 0) {
@@ -170,11 +173,11 @@ function MainContent() {
       }
       setDbCategories(catList);
 
-      if (snapshot.docs.length > 0) {
-        setLastProductDoc(snapshot.docs[snapshot.docs.length - 1]);
+      if (currentProdSnap.docs.length > 0) {
+        setLastProductDoc(currentProdSnap.docs[currentProdSnap.docs.length - 1]);
       }
-      setHasMoreProducts(snapshot.docs.length === 40);
-      const prodList = snapshot.docs.map((doc: any, idx: number) => {
+      setHasMoreProducts(currentProdSnap.docs.length === 40);
+      const prodList = currentProdSnap.docs.map((doc: any, idx: number) => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -194,41 +197,50 @@ function MainContent() {
       setDisplayedProducts(prodList);
     };
 
-    try {
-      // Try fetching fresh data first
-      const catSnap = await getDocs(collection(db, "categories"));
-      const q = query(collection(db, "products"));
-      const snapshot = await getDocs(q);
-      processData(catSnap, snapshot);
-    } catch (err: any) {
-      if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Firebase fetch error:', err); if (err.code === 'permission-denied') { alert('Please refresh the page to load the new database configuration.'); }
-      if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-        // Fallback to cache if quota exceeded
-        try {
-          console.log("Quota exceeded. Attempting to load from local cache...");
-          const catSnap = await getDocsFromCache(collection(db, "categories"));
-          const q = query(collection(db, "products"));
-          const snapshot = await getDocsFromCache(q);
-          if (catSnap.empty && snapshot.empty) {
-            throw new Error("Cache is empty");
-          }
-          processData(catSnap, snapshot);
-        } catch (cacheErr) {
-          console.error("Cache fallback failed:", cacheErr);
-          // Ultimate fallback (dummy data) just so the app doesn't go totally blank
-          setDbCategories([
-            { id: "gro", nameEn: "Grocery", nameHi: "किराना", emoji: "🛍️", displayOrder: 1, isActive: true }
-          ]);
-          setDisplayedProducts([
-            { id: "1", name: "PATAKA TEA 250GM (Offline Mode)", price: 100, category: "Grocery", image: "https://m.media-amazon.com/images/I/71R2nJgW-uL._SL1000_.jpg", isActive: true, isAvailable: true, isBestseller: true }
-          ]);
+    const handleQuotaFallback = async () => {
+      console.log("Attempting to load from local cache...");
+      try {
+        currentCatSnap = await getDocsFromCache(collection(db, "categories"));
+        currentProdSnap = await getDocsFromCache(query(collection(db, "products")));
+        if (currentCatSnap.empty && currentProdSnap.empty) {
+          throw new Error("Cache is empty");
         }
+        processData();
+      } catch (cacheErr) {
+        console.error("Cache fallback failed:", cacheErr);
+        setDbCategories([
+          { id: "gro", nameEn: "Grocery", nameHi: "किराना", emoji: "🛍️", displayOrder: 1, isActive: true }
+        ]);
+        setDisplayedProducts([
+          { id: "1", name: "PATAKA TEA 250GM (Offline Mode)", price: 100, category: "Grocery", image: "https://m.media-amazon.com/images/I/71R2nJgW-uL._SL1000_.jpg", isActive: true, isAvailable: true, isBestseller: true }
+        ]);
       }
-    }
-  };
+    };
 
-  useEffect(() => {
-    fetchData();
+    const unsubCats = onSnapshot(collection(db, "categories"), (snap) => {
+      currentCatSnap = snap;
+      processData();
+    }, (err: any) => {
+      if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Firebase fetch error:', err);
+      if (err.code === 'permission-denied') { alert('Please refresh the page to load the new database configuration.'); }
+      if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
+        handleQuotaFallback();
+      }
+    });
+
+    const unsubProds = onSnapshot(query(collection(db, "products")), (snap) => {
+      currentProdSnap = snap;
+      processData();
+    }, (err: any) => {
+      if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
+        handleQuotaFallback();
+      }
+    });
+
+    return () => {
+      unsubCats();
+      unsubProds();
+    };
   }, []);
 
   const loadMoreProducts = async () => {
@@ -521,7 +533,7 @@ function MainContent() {
         <AdminCategoryModal 
           category={editingCategory === "new" ? null : editingCategory}
           onClose={() => setEditingCategory(null)}
-          onSaved={() => { setEditingCategory(null); fetchData(); }}
+          onSaved={() => { setEditingCategory(null); }}
         />
       )}
       {editingProduct && (
@@ -529,7 +541,7 @@ function MainContent() {
           product={editingProduct === "new" ? null : editingProduct}
           categories={dbCategories}
           onClose={() => setEditingProduct(null)}
-          onSaved={() => { setEditingProduct(null); fetchData(); }}
+          onSaved={() => { setEditingProduct(null); }}
         />
       )}
     </>

@@ -65,8 +65,7 @@ service cloud.firestore {
     
     function isValidSeat(data) {
       return data.keys().hasAll(['isOccupied', 'updatedAt'])
-          && data.isOccupied is bool
-          && data.updatedAt == request.time;
+          && data.isOccupied is bool;
     }
 
     // --------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import {
   getDocsFromCache,
   doc,
   setDoc,
-  deleteDoc,
+  deleteDoc, onSnapshot,
   query,
 } from "firebase/firestore";
 import {
@@ -23,6 +23,8 @@ import { processImageToBase64 } from '../../lib/imageProcessor';
 export function CategoryManagement() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -40,10 +42,6 @@ export function CategoryManagement() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchCategories();
-  }, []);
-
-  const fetchCategories = async () => {
     const processCategories = (snapshot: any) => {
       const catList = snapshot.docs.map((doc: any) => ({
         id: doc.id,
@@ -51,33 +49,29 @@ export function CategoryManagement() {
       }));
       catList.sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
       setCategories(catList);
+      setLoading(false);
     };
 
-    try {
-      const q = query(collection(db, "categories"));
-      const snapshot = await getDocs(q);
+    const unsub = onSnapshot(query(collection(db, "categories")), (snapshot) => {
       processCategories(snapshot);
-    } catch (err: any) {
+    }, (err: any) => {
       if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Fetch categories error:', err);
       if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-        try {
-          const snapshot = await getDocsFromCache(query(collection(db, "categories")));
-          if (snapshot.empty) {
-            setError("Firebase Database quota exceeded for today. Please upgrade your Firebase plan or try again tomorrow.");
-          } else {
-            processCategories(snapshot);
-          }
-        } catch (e) { 
-          console.error(e); 
+        getDocsFromCache(query(collection(db, "categories"))).then((snapshot) => {
+          if (snapshot.empty) setError("Firebase Database quota exceeded for today. Please upgrade your Firebase plan or try again tomorrow.");
+          else processCategories(snapshot);
+        }).catch(e => {
+          console.error(e);
           setError("Database quota exceeded and no local cache available.");
-        }
+        });
       } else {
         setError(err.message);
       }
-    } finally {
       setLoading(false);
-    }
-  };
+    });
+
+    return () => unsub();
+  }, []);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -144,10 +138,10 @@ export function CategoryManagement() {
 
       await setDoc(doc(db, "categories", catId), dataToSave, { merge: true });
       alert(editingId ? "Category successfully updated!" : "Category successfully added!");
-      fetchCategories();
+      
       resetForm();
     } catch (err: any) {
-      alert("Error saving category: " + err.message);
+      setActionError("Error saving: " + err.message);
     } finally {
       setActionLoading(false);
       setUploadStatus("");
@@ -155,12 +149,16 @@ export function CategoryManagement() {
   };
 
   const handleDeleteCategory = async (id: string) => {
-    if (!window.confirm("Delete this category? Products in this category will still exist but might not display correctly until updated.")) return;
+    setDeleteConfirmId(id);
+    return;
+  };
+
+  const executeDelete = async (id: string) => {
     try {
       await deleteDoc(doc(db, "categories", id));
-      fetchCategories();
+      
     } catch (err: any) {
-      alert("Error deleting category: " + err.message);
+      setActionError("Error deleting: " + err.message);
     }
   };
 
@@ -317,6 +315,28 @@ export function CategoryManagement() {
           </div>
         )}
       </div>
-    </div>
+    
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900">Confirm Deletion</h3>
+            <p className="text-gray-600">Are you sure you want to delete this category?</p>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200">Cancel</button>
+              <button onClick={() => { executeDelete(deleteConfirmId); setDeleteConfirmId(null); }} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {actionError && (
+        <div className="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-4 rounded-xl shadow-lg flex justify-between items-center z-50">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="p-1 hover:bg-red-700 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+  
+</div>
   );
 }

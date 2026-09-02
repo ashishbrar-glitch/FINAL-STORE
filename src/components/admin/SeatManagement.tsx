@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, getDocs, getDocsFromCache, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, getDocsFromCache, doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { User, Loader2, UserMinus } from 'lucide-react';
 
 // Reusing same seat generation logic
@@ -21,32 +21,30 @@ export function SeatManagement() {
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    fetchSeats();
-  }, []);
-
-  const fetchSeats = async () => {
     const processSeats = (snapshot: any) => {
       const seatData: Record<string, any> = {};
       snapshot.forEach((doc: any) => {
         seatData[doc.id] = doc.data();
       });
       setSeats(seatData);
+      setLoading(false);
     };
-    try {
-      const snapshot = await getDocs(collection(db, 'seats'));
+
+    const unsub = onSnapshot(collection(db, 'seats'), (snapshot) => {
       processSeats(snapshot);
-    } catch (err: any) {
+    }, (err: any) => {
       if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Fetch seats error:', err);
       if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-        try {
-          const snapshot = await getDocsFromCache(collection(db, 'seats'));
-          processSeats(snapshot);
-        } catch (e) { console.error(e); }
+        getDocsFromCache(collection(db, 'seats'))
+          .then(processSeats)
+          .catch(e => { console.error(e); setLoading(false); });
+      } else {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    });
+
+    return () => unsub();
+  }, []);
 
   const handleSeatClick = (seatId: string) => {
     setSelectedSeatId(seatId);
@@ -72,7 +70,7 @@ export function SeatManagement() {
         updatedAt: serverTimestamp()
       }, { merge: true });
             
-      await fetchSeats();
+      
       setSelectedSeatId(null);
     } catch (err: any) {
       alert("Error saving: " + err.message);
@@ -100,7 +98,7 @@ export function SeatManagement() {
         updatedAt: serverTimestamp()
       }, { merge: true });
             
-      await fetchSeats();
+      
       setSelectedSeatId(null);
     } catch (err: any) {
       alert("Error clearing: " + err.message);
