@@ -1,9 +1,10 @@
 import React from 'react';
-import { FolderTree, LogOut, ArrowLeft, Users, ShieldAlert, BookOpen, Package } from 'lucide-react';
+import { FolderTree, LogOut, ArrowLeft, Users, ShieldAlert, BookOpen, Package, Database } from 'lucide-react';
 import { UserManagement } from './admin/UserManagement';
 import { InventoryManagement } from './admin/InventoryManagement';
 import { CategoryManagement } from './admin/CategoryManagement';
 import { SeatManagement } from './admin/SeatManagement';
+import { DataBackup } from './admin/DataBackup';
 
 interface Props {
   role: string;
@@ -67,6 +68,16 @@ export function AdminDashboard({ role, onLogout, onBack }: Props) {
               <Package className="w-6 h-6" />
             </div>
             <InventoryManagement />
+          </div>
+        )}
+
+        {/* Module: Data Backup & Restore (Admins, Superadmins) */}
+        {isAdmin && (
+          <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
+            <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mb-3">
+              <Database className="w-6 h-6" />
+            </div>
+            <DataBackup />
           </div>
         )}
 
