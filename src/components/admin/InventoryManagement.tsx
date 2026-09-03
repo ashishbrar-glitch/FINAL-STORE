@@ -23,7 +23,11 @@ import imageCompression from "browser-image-compression";
 
 import { processImageToBase64 } from '../../lib/imageProcessor';
 
+import { BackgroundRemovalPOC } from "./BackgroundRemovalPOC";
+import { AdminProductModal } from "./AdminProductModal";
+
 export function InventoryManagement() {
+  const [showBGPOC, setShowBGPOC] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +35,8 @@ export function InventoryManagement() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [modalProduct, setModalProduct] = useState<any | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Form states
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -116,14 +122,8 @@ export function InventoryManagement() {
   };
 
   const handleEdit = (product: any) => {
-    document.getElementById('inventory-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    setName(product.name);
-    setPrice(product.price.toString());
-    setCategory(product.category);
-    setImagePreview(product.imageUrl || product.image); // fallback to emoji image for demo seed
-    setEditingId(product.id);
-    setIsAvailable(product.isAvailable !== false);
-    setShowAddForm(true);
+    setModalProduct(product);
+    setIsModalOpen(true);
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -193,128 +193,31 @@ export function InventoryManagement() {
     return (
       <div className="p-8 flex justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-[#0e783a]" />
-      </div>
+
+      
+  </div>
     );
 
   return (
     <div id="inventory-section" className="space-y-4 scroll-mt-20">
       <div className="flex items-center justify-between">
-        <h3 className="font-bold text-gray-900 text-lg">Inventory</h3>
+        <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">Inventory</h3>
         <button
-          onClick={() => (showAddForm ? resetForm() : setShowAddForm(true))}
+          onClick={() => { setModalProduct(null); setIsModalOpen(true); }}
           className="flex items-center gap-1 text-sm bg-green-50 text-[#0e783a] px-3 py-1.5 rounded-lg font-medium"
         >
-          {showAddForm ? (
-            <X className="w-4 h-4" />
-          ) : (
-            <Plus className="w-4 h-4" />
-          )}
-          {showAddForm ? "Cancel" : "Add Item"}
+          <Plus className="w-4 h-4" />
+          Add Item
         </button>
       </div>
 
-      {showAddForm && (
-        <form
-          onSubmit={handleSaveProduct}
-          className="bg-green-50/50 p-4 rounded-2xl border border-green-100 space-y-3"
-        >
-          {/* Image Upload Area */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full h-32 bg-white border-2 border-dashed border-green-200 rounded-xl flex flex-col items-center justify-center cursor-pointer overflow-hidden relative hover:bg-green-50/50 transition-colors"
-          >
-            {imagePreview ? (
-              // Use standard img tag if it's a URL, or render emoji if it's from the seed
-              imagePreview.startsWith("http") ||
-              imagePreview.startsWith("data:") ? (
-                <img
-                  src={imagePreview}
-                  alt="Preview"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="text-4xl">{imagePreview}</div>
-              )
-            ) : (
-              <>
-                <ImageIcon className="w-8 h-8 text-green-300 mb-2" />
-                <span className="text-xs font-medium text-green-700">
-                  Tap to upload photo
-                </span>
-              </>
-            )}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleImageChange}
-              accept="image/*, .heic, .heif"
-              className="hidden"
-            />
-          </div>
-
-          <input
-            type="text"
-            placeholder="Product Name"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200"
-          />
-          <div className="flex gap-2">
-            <input
-              type="number"
-              placeholder="Price (₹)"
-              required
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              className="w-1/3 text-sm px-3 py-2 rounded-xl border border-gray-200"
-            />
-            
-            <select
-              required
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-2/3 text-sm px-3 py-2 rounded-xl border border-gray-200 bg-white"
-            >
-              <option value="" disabled>Select Category</option>
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.nameEn || c.name} {c.emoji}</option>
-              ))}
-            </select>
-
-          </div>
-
-          
-          <div className="flex items-center gap-2 mt-2 bg-white p-3 rounded-xl border border-gray-100">
-            <input
-              type="checkbox"
-              id="isAvailable"
-              checked={isAvailable}
-              onChange={(e) => setIsAvailable(e.target.checked)}
-              className="w-4 h-4 text-[#0e783a] bg-gray-100 border-gray-300 rounded focus:ring-[#0e783a]"
-            />
-            <label htmlFor="isAvailable" className="text-sm font-medium text-gray-700">
-              In Stock (Available for purchase)
-            </label>
-          </div>
-
-          <button type="submit" disabled={actionLoading}
-            className="w-full bg-[#0e783a] text-white py-2 rounded-xl font-medium flex justify-center flex-col items-center gap-1"
-          >
-            {actionLoading ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                {uploadStatus && (
-                  <span className="text-[10px] opacity-80">{uploadStatus}</span>
-                )}
-              </>
-            ) : editingId ? (
-              "Update Item"
-            ) : (
-              "Add Item"
-            )}
-          </button>
-        </form>
+      {isModalOpen && (
+        <AdminProductModal 
+          product={modalProduct}
+          categories={categories}
+          onClose={() => setIsModalOpen(false)}
+          onSaved={() => setIsModalOpen(false)}
+        />
       )}
 
       <div className="space-y-3">
@@ -337,7 +240,9 @@ export function InventoryManagement() {
                   <Package className="w-6 h-6 text-gray-400" />
                 )
               )}
-            </div>
+
+      
+  </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-gray-900 text-sm truncate">
                 {product.name}
@@ -349,8 +254,12 @@ export function InventoryManagement() {
                 <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
                   {categories.find(c => c.id === (product.categoryId || product.category))?.nameEn || product.category}
                 </span>
-              </div>
-            </div>
+
+      
+  </div>
+
+      
+  </div>
             <div className="flex gap-1 shrink-0">
               <button
                 onClick={() => handleEdit(product)}
@@ -364,15 +273,23 @@ export function InventoryManagement() {
               >
                 <Trash2 className="w-4 h-4" />
               </button>
-            </div>
-          </div>
+
+      
+  </div>
+
+      
+  </div>
         ))}
         {products.length === 0 && !loading && (
           <div className="text-center py-8 text-gray-500 text-sm">
             No items in inventory.
-          </div>
+
+      
+  </div>
         )}
-      </div>
+
+      
+  </div>
     
       {deleteConfirmId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -382,9 +299,15 @@ export function InventoryManagement() {
             <div className="flex gap-3 pt-2">
               <button onClick={() => setDeleteConfirmId(null)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200">Cancel</button>
               <button onClick={() => { executeDelete(deleteConfirmId); setDeleteConfirmId(null); }} className="flex-1 px-4 py-2 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700">Delete</button>
-            </div>
-          </div>
-        </div>
+
+      
+  </div>
+
+      
+  </div>
+
+      
+  </div>
       )}
       {actionError && (
         <div className="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-4 rounded-xl shadow-lg flex justify-between items-center z-50">
@@ -392,9 +315,13 @@ export function InventoryManagement() {
           <button onClick={() => setActionError(null)} className="p-1 hover:bg-red-700 rounded">
             <X className="w-5 h-5" />
           </button>
-        </div>
+
+      
+  </div>
       )}
   
-</div>
+    
+      {showBGPOC && <BackgroundRemovalPOC onClose={() => setShowBGPOC(false)} />}
+  </div>
   );
 }

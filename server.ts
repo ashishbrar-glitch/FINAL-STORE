@@ -76,6 +76,33 @@ Return ONLY a JSON array of matching product IDs. Example: ["1", "5"]`;
     }
   });
   
+  app.post("/api/generate-image", async (req, res) => {
+    try {
+      const { productName } = req.body;
+      if (!productName) {
+        return res.status(400).json({ error: "Product name is required" });
+      }
+
+      const prompt = `A professional, high-quality studio photography shot of a product called "${productName}". The product is centered on a pure, clean white background, perfectly lit, suitable for an e-commerce catalogue.`;
+
+      const response = await getAiClient().models.generateImages({
+        model: "imagen-3.0-generate-002",
+        prompt: prompt,
+        config: {
+          numberOfImages: 1,
+          outputMimeType: "image/jpeg",
+          aspectRatio: "1:1",
+        }
+      });
+
+      const base64Image = response.generatedImages[0].image.imageBytes;
+      res.json({ imageUrl: `data:image/jpeg;base64,${base64Image}` });
+    } catch (error) {
+      console.error("Image Generation API Error:", error);
+      res.status(500).json({ error: "Image generation failed" });
+    }
+  });
+
   app.get("/api/products", (req, res) => {
     res.json(PRODUCTS);
   });

@@ -87,6 +87,15 @@ const PHONE_NUMBER = "918601866018";
 const GIRLS_SEATS = Array.from({ length: 33 }, (_, i) => `G${i + 1}`);
 const BOYS_SEATS = Array.from({ length: 38 }, (_, i) => `B${i + 34}`);
 
+const randomOffsets: Record<string, number> = {};
+function getSortWeight(id: string) {
+  if (randomOffsets[id] === undefined) {
+    randomOffsets[id] = Math.random();
+  }
+  return randomOffsets[id];
+}
+
+
 function MainContent() {
   const [currentView, setCurrentView] = useState<View>("home");
   const [products, setProducts] = useState<Product[]>([]);
@@ -193,6 +202,9 @@ function MainContent() {
           isBestseller: data.isBestseller ?? (idx === 0 || idx === 3),
         };
       }) as Product[];
+      // Sort items randomly but stably per page load
+      prodList.sort((a, b) => getSortWeight(a.id) - getSortWeight(b.id));
+      
       setProducts(prodList);
       setDisplayedProducts(prodList);
     };
@@ -476,8 +488,14 @@ function MainContent() {
           </button>
         )}
         {title === "BCN Store" ? (
-          <div className="bg-white rounded-xl px-2 py-1 shadow-sm">
-            <img src="/logo.png" alt="BCN Store Logo" className="h-10 object-contain" />
+          <div className="flex items-center gap-2.5">
+            <div className="bg-white rounded-xl px-2 py-1 shadow-sm shrink-0">
+              <img src="/logo.png" alt="BCN Store Logo" className="h-8 sm:h-9 object-contain" />
+            </div>
+            <div className="flex flex-col justify-center">
+              <span className="text-[9px] font-extrabold text-[#EFC04E] uppercase tracking-widest leading-tight">Available in</span>
+              <span className="text-[12px] font-semibold text-white leading-tight flex items-center gap-1">Singhwa Khas & Madanheri <span className="text-[10px]">📍</span></span>
+            </div>
           </div>
         ) : (
           <>
