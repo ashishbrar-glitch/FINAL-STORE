@@ -65,7 +65,7 @@ export function AdminLogin({ onBack, onLoginSuccess }: Props) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="sticky top-0 z-10 flex items-center px-4 py-3 bg-[#EFC04E] shadow-sm">
+      <header className="sticky top-0 z-50 flex items-center px-4 py-3 bg-[#EFC04E] shadow-sm">
         <button onClick={onBack} className="p-1 -ml-1 mr-3 rounded-full hover:bg-black/10 transition-colors">
           <ArrowLeft className="w-6 h-6 text-[#0e783a]" />
         </button>

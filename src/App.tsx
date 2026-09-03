@@ -438,7 +438,7 @@ function MainContent() {
     iconTextColor: string = "text-[#0e783a]",
     iconBorderColor: string = "border-[#0e783a]"
   ) => (
-    <header className={`sticky top-0 z-10 flex items-center justify-between px-4 h-[51px] ${headerColor} shadow-sm`}>
+    <header className={`sticky top-0 z-50 flex items-center justify-between px-4 h-[51px] ${headerColor} shadow-sm`}>
       <div className="flex items-center gap-3">
         {onBack && (
           <button
@@ -540,7 +540,7 @@ function MainContent() {
         {renderHeader("Order Items", () => setCurrentView("home"))}
 
         {/* Search Bar & Categories (Sticky) */}
-        <div className="sticky top-[60px] z-10 bg-gray-50/95 backdrop-blur-sm pt-4 pb-3 border-b border-gray-200">
+        <div className="sticky top-[51px] z-40 bg-gray-50/95 backdrop-blur-sm pt-4 pb-3 border-b border-gray-200">
           <div className="relative max-w-md mx-auto px-4 mb-4">
             <div className="relative">
               <input
