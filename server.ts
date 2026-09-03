@@ -1,25 +1,8 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-
 dotenv.config();
-
-let ai;
-function getAiClient() {
-  if (!ai) {
-    ai = new GoogleGenAI({ 
-      apiKey: process.env.GEMINI_API_KEY || 'dummy_key',
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-  }
-  return ai;
-}
 
 const PRODUCTS = [
   { id: '1', name: 'Aashirvaad Atta (5kg)', price: 210, category: 'Grocery', image: '🌾' },
@@ -39,69 +22,8 @@ const PRODUCTS = [
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  app.use(express.json());
-
-  // API routes FIRST
-  app.post("/api/search", async (req, res) => {
-    try {
-      const { query, products } = req.body;
-      if (!query || !products) {
-        return res.json({ productIds: [] });
-      }
-
-      const prompt = `Match the user query "${query}" to the following products. Handle typos, regional languages (like Hindi/English translation), and semantic intent (e.g. "sweet" -> sugar, "head ache" -> paracetamol, "chai" -> tea). Products: ${JSON.stringify(products.map(p => ({id: p.id, name: p.name, category: p.category})))}
-Return ONLY a JSON array of matching product IDs. Example: ["1", "5"]`;
-
-      const response = await getAiClient().models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.STRING
-            }
-          },
-          temperature: 0,
-        }
-      });
-
-      const matchedIds = JSON.parse(response.text);
-      res.json({ productIds: matchedIds });
-    } catch (error) {
-      console.error("Search API Error:", error);
-      res.status(500).json({ error: "Search failed", productIds: [] });
-    }
-  });
   
-  app.post("/api/generate-image", async (req, res) => {
-    try {
-      const { productName } = req.body;
-      if (!productName) {
-        return res.status(400).json({ error: "Product name is required" });
-      }
-
-      const prompt = `A professional, high-quality studio photography shot of a product called "${productName}". The product is centered on a pure, clean white background, perfectly lit, suitable for an e-commerce catalogue.`;
-
-      const response = await getAiClient().models.generateImages({
-        model: "imagen-3.0-generate-002",
-        prompt: prompt,
-        config: {
-          numberOfImages: 1,
-          outputMimeType: "image/jpeg",
-          aspectRatio: "1:1",
-        }
-      });
-
-      const base64Image = response.generatedImages[0].image.imageBytes;
-      res.json({ imageUrl: `data:image/jpeg;base64,${base64Image}` });
-    } catch (error) {
-      console.error("Image Generation API Error:", error);
-      res.status(500).json({ error: "Image generation failed" });
-    }
-  });
+  app.use(express.json());
 
   app.get("/api/products", (req, res) => {
     res.json(PRODUCTS);

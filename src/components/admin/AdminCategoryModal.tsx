@@ -37,8 +37,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
   const [baseTransparentCanvas, setBaseTransparentCanvas] = useState<HTMLCanvasElement | null>(null);
   const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
 
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [submitMode, setSubmitMode] = useState<'original' | 'generated' | 'existing'>('existing');
+    const [submitMode, setSubmitMode] = useState<'original' | 'generated' | 'existing'>('existing');
   const [errorMsg, setErrorMsg] = useState("");
 
   const [brightness, setBrightness] = useState(100);
@@ -51,31 +50,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
     setSaturation(100);
   };
 
-  const handleGenerateImage = async () => {
-    if (!nameEn) {
-      alert("Please enter a category name first to generate an image.");
-      return;
-    }
-    setIsGeneratingImage(true);
-    try {
-      const response = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName: nameEn + " category icon" })
-      });
-      if (!response.ok) throw new Error("Failed to generate image");
-      const data = await response.json();
-      setOriginalPreview(data.imageUrl);
-      setOriginalImageFile(null);
-      setImageState('idle');
-    } catch (error) {
-      console.error(error);
-      alert("Failed to generate image. Please try again.");
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
+  
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -396,16 +371,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                       )}
                     </div>
                     
-                    <button
-                      type="button"
-                      onClick={handleGenerateImage}
-                      disabled={isGeneratingImage || !nameEn}
-                      className="w-full py-3 px-4 bg-purple-50 text-purple-700 rounded-xl border border-purple-100 flex items-center justify-center gap-2 font-bold text-sm hover:bg-purple-100 transition-colors disabled:opacity-50"
-                    >
-                      {isGeneratingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                      {isGeneratingImage ? "Generating AI Image..." : "Auto-Generate AI Image"}
-                    </button>
-                  </div>
+                    </div>
                )}
                
                {originalImageFile && (

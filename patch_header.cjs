@@ -2,28 +2,39 @@ const fs = require('fs');
 const file = 'src/App.tsx';
 let content = fs.readFileSync(file, 'utf8');
 
-const targetHeader = `{title === "BCN Store" ? (
-          <div className="bg-white rounded-xl px-2 py-1 shadow-sm">
-            <img src="/logo.png" alt="BCN Store Logo" className="h-10 object-contain" />
+const targetStr = `      </div>
+      {rightElement || (
+        currentView !== "cart" && (`;
+        
+const newStr = `      </div>
+      <div className="flex items-center gap-2">
+        {!isOnline && (
+          <div className="flex items-center gap-1 bg-red-500/20 text-red-100 px-2 py-1 rounded-full text-[10px] font-medium border border-red-500/30 whitespace-nowrap" title="Offline - Showing cached data">
+            <WifiOff className="w-3 h-3" />
+            <span className="hidden sm:inline">Offline</span>
           </div>
-        ) : (`;
-
-const replaceHeader = `{title === "BCN Store" ? (
-          <div className="flex items-center gap-2.5">
-            <div className="bg-white rounded-xl px-2 py-1 shadow-sm shrink-0">
-              <img src="/logo.png" alt="BCN Store Logo" className="h-8 sm:h-9 object-contain" />
-            </div>
-            <div className="flex flex-col justify-center">
-              <span className="text-[9px] font-extrabold text-[#EFC04E] uppercase tracking-widest leading-tight">Available in</span>
-              <span className="text-[12px] font-semibold text-white leading-tight flex items-center gap-1">Singhwa Khas & Madanheri <span className="text-[10px]">📍</span></span>
-            </div>
-          </div>
-        ) : (`;
-
-if (content.includes(targetHeader)) {
-  content = content.replace(targetHeader, replaceHeader);
+        )}
+        {rightElement || (
+          currentView !== "cart" && (`;
+          
+if (content.includes(targetStr) && !content.includes('WifiOff className')) {
+  content = content.replace(targetStr, newStr);
+  
+  // also need to close the added div at the end of the header
+  const endTarget = `          </div>
+        )
+      )}
+    </header>`;
+  
+  const endNew = `          </div>
+        )
+      )}
+      </div>
+    </header>`;
+    
+  content = content.replace(endTarget, endNew);
   fs.writeFileSync(file, content);
-  console.log("Patched App.tsx with location text");
+  console.log("Patched successfully");
 } else {
-  console.log("Could not find target header to replace");
+  console.log("Could not find target string");
 }

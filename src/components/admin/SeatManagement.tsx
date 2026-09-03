@@ -69,8 +69,21 @@ export function SeatManagement() {
         deposit: isOccupied ? Number(deposit) : null,
         updatedAt: serverTimestamp()
       }, { merge: true });
-            
       
+      // Update local state manually in case quota is exceeded and listener is dead
+      setSeats(prev => ({
+        ...prev,
+        [selectedSeatId]: {
+          ...prev[selectedSeatId],
+          seatId: selectedSeatId,
+          isOccupied,
+          allocatedTo: isOccupied ? allocateeName.trim() : null,
+          phone: isOccupied ? allocateePhone.trim() : null,
+          startDate: isOccupied ? startDate : null,
+          deposit: isOccupied ? Number(deposit) : null,
+        }
+      }));
+            
       setSelectedSeatId(null);
     } catch (err: any) {
       alert("Error saving: " + err.message);
@@ -97,8 +110,21 @@ export function SeatManagement() {
         deposit: null,
         updatedAt: serverTimestamp()
       }, { merge: true });
-            
       
+      // Update local state manually in case quota is exceeded and listener is dead
+      setSeats(prev => ({
+        ...prev,
+        [selectedSeatId]: {
+          ...prev[selectedSeatId],
+          seatId: selectedSeatId,
+          isOccupied: false,
+          allocatedTo: null,
+          phone: null,
+          startDate: null,
+          deposit: null,
+        }
+      }));
+            
       setSelectedSeatId(null);
     } catch (err: any) {
       alert("Error clearing: " + err.message);

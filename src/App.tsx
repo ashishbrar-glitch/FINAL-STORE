@@ -22,6 +22,7 @@ import {
   Loader2,
   X,
   Wifi,
+  WifiOff,
   Users,
   Zap,
   Wind,
@@ -97,6 +98,7 @@ function getSortWeight(id: string) {
 
 
 function MainContent() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [currentView, setCurrentView] = useState<View>("home");
   const [products, setProducts] = useState<Product[]>([]);
   const [displayedProducts, setDisplayedProducts] = useState<Product[]>([]);
@@ -219,7 +221,7 @@ function MainContent() {
         }
         processData();
       } catch (cacheErr) {
-        console.error("Cache fallback failed:", cacheErr);
+        console.warn("Cache fallback failed:", cacheErr);
         setDbCategories([
           { id: "gro", nameEn: "Grocery", nameHi: "किराना", emoji: "🛍️", displayOrder: 1, isActive: true }
         ]);
@@ -296,7 +298,7 @@ function MainContent() {
           const snapshot = await getDocsFromCache(q);
           processSnapshot(snapshot);
         } catch (cacheErr) {
-          console.error("Cache fallback failed for load more:", cacheErr);
+          console.warn("Cache fallback failed for load more:", cacheErr);
         }
       }
     }
@@ -305,7 +307,9 @@ function MainContent() {
   // Fetch real seat allocations
   const [occupiedSeats, setOccupiedSeats] = useState<Set<string>>(new Set());
   useEffect(() => {
-    const fetchRealSeats = async () => {
+    let unsub = () => {};
+    // Only fetch seats if we are viewing the library to save quota!
+    if (currentView === "library" || currentView === "library-summary") {
       const processSeats = (snapshot: any) => {
         const occupied = new Set<string>();
         snapshot.forEach((doc: any) => {
@@ -316,26 +320,19 @@ function MainContent() {
         setOccupiedSeats(occupied);
       };
 
-      try {
-        const snapshot = await getDocs(collection(db, "seats"));
+      unsub = onSnapshot(collection(db, "seats"), (snapshot) => {
         processSeats(snapshot);
-      } catch (err: any) {
+      }, (err: any) => {
         if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Seat fetch error:', err);
         if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-          try {
-            const snapshot = await getDocsFromCache(collection(db, "seats"));
-            processSeats(snapshot);
-          } catch (cacheErr) {
-            console.error("Cache fallback for seats failed:", cacheErr);
-          }
+          getDocsFromCache(collection(db, "seats"))
+            .then(processSeats)
+            .catch(cacheErr => console.warn("Cache fallback for seats failed:", cacheErr));
         }
-      }
-    };
-    
-    // Only fetch seats if we are viewing the library to save quota!
-    if (currentView === "library" || currentView === "library-summary") {
-      fetchRealSeats();
+      });
     }
+    
+    return () => unsub();
   }, [currentView]); // Re-fetch seats when opening the library
 
   // Handle Search & Filter
@@ -361,42 +358,6 @@ function MainContent() {
         p.category.toLowerCase().includes(lowerQuery),
     );
     setDisplayedProducts(localMatches);
-
-    // 3. Debounced AI search for semantic matches / typos
-    const handler = setTimeout(async () => {
-      if (lowerQuery.length < 3) return; // Skip AI search for very short queries
-
-      setIsSearching(true);
-      try {
-        const response = await fetch("/api/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: lowerQuery, products: categoryMatches.map(p => ({ id: p.id, name: p.name, category: p.category })) }),
-        });
-        const data = await response.json();
-
-        if (data.productIds) {
-          const aiMatched = categoryMatches.filter((p) =>
-            data.productIds.includes(p.id),
-          );
-
-          // Merge local and AI results without duplicates
-          const combined = [...localMatches];
-          aiMatched.forEach((aiProduct) => {
-            if (!combined.some((c) => c.id === aiProduct.id)) {
-              combined.push(aiProduct);
-            }
-          });
-          setDisplayedProducts(combined);
-        }
-      } catch (error) {
-        console.error("Search failed:", error);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 800); // Increased debounce to save API quota
-
-    return () => clearTimeout(handler);
   }, [searchQuery, products, selectedCategory]);
 
   // --- ACTIONS ---
@@ -517,8 +478,15 @@ function MainContent() {
           </>
         )}
       </div>
-      {rightElement || (
-        currentView !== "cart" && (
+      <div className="flex items-center gap-2">
+        {!isOnline && (
+          <div className="flex items-center gap-1 bg-red-500/20 text-red-100 px-2 py-1 rounded-full text-[10px] font-medium border border-red-500/30 whitespace-nowrap" title="Offline - Showing cached data">
+            <WifiOff className="w-3 h-3" />
+            <span className="hidden sm:inline">Offline</span>
+          </div>
+        )}
+        {rightElement || (
+          currentView !== "cart" && (
           <div className="flex items-center gap-2">
             <button
               onClick={handleInstallClick}
@@ -541,6 +509,7 @@ function MainContent() {
           </div>
         )
       )}
+      </div>
     </header>
   );
 
