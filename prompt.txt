@@ -1,0 +1,7 @@
+Analyze the entire current product and category catalog to find logical cross-selling relationships and commonly purchased-together items.
+Find both same-category and cross-category complementary products.
+Prioritize meaningful complementary products (items used together) over merely similar products.
+Create useful multi-step shopping chains by ensuring relationships can naturally continue into another related product.
+You MUST use ONLY real product IDs from the provided catalog.
+Return ONLY a JSON object where the keys are product IDs, and the values are arrays of related product IDs (no limit on count).
+Do NOT wrap it in markdown block quotes.`;

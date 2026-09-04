@@ -306,7 +306,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
                 placeholder="Product Name"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => setName(e.target.value.toUpperCase())}
                 className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
               />
               <div className="flex gap-3">

@@ -1,0 +1,259 @@
+{
+  "name": "projects/bcn-store-c52c9/databases/ai-studio-bcnstore-041453b7-6922-4e2a-9e3d-2fb6d648df8d/documents/system/recommendations",
+  "fields": {
+    "relations": {
+      "mapValue": {
+        "fields": {
+          "1788206988931": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "1788207485864"
+                },
+                {
+                  "stringValue": "1788206957621"
+                },
+                {
+                  "stringValue": "1788206364260"
+                },
+                {
+                  "stringValue": "1788206504313"
+                }
+              ]
+            }
+          },
+          "1788207485864": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "1788206988931"
+                },
+                {
+                  "stringValue": "1788206957621"
+                },
+                {
+                  "stringValue": "1788206364260"
+                },
+                {
+                  "stringValue": "1788206504313"
+                }
+              ]
+            }
+          },
+          "1788206957621": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "1788206988931"
+                },
+                {
+                  "stringValue": "1788207485864"
+                },
+                {
+                  "stringValue": "1788206364260"
+                },
+                {
+                  "stringValue": "1788206504313"
+                }
+              ]
+            }
+          },
+          "1788206364260": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "1788206988931"
+                },
+                {
+                  "stringValue": "1788207485864"
+                },
+                {
+                  "stringValue": "1788206957621"
+                },
+                {
+                  "stringValue": "1788206504313"
+                }
+              ]
+            }
+          },
+          "1788206504313": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "1788206988931"
+                },
+                {
+                  "stringValue": "1788207485864"
+                },
+                {
+                  "stringValue": "1788206957621"
+                },
+                {
+                  "stringValue": "1788206364260"
+                }
+              ]
+            }
+          },
+          "DAYP10jqcyA5P9WIctVT": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "lPd0LUk5KMvWOExLaVnS"
+                }
+              ]
+            }
+          },
+          "lPd0LUk5KMvWOExLaVnS": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "DAYP10jqcyA5P9WIctVT"
+                }
+              ]
+            }
+          },
+          "1788207252613": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788207390006"
+                },
+                {
+                  "stringValue": "1788207295956"
+                },
+                {
+                  "stringValue": "1788207544914"
+                }
+              ]
+            }
+          },
+          "1788207390006": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788207252613"
+                },
+                {
+                  "stringValue": "1788207295956"
+                },
+                {
+                  "stringValue": "1788207544914"
+                }
+              ]
+            }
+          },
+          "1788207295956": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788207252613"
+                },
+                {
+                  "stringValue": "1788207390006"
+                },
+                {
+                  "stringValue": "1788207544914"
+                }
+              ]
+            }
+          },
+          "1788207544914": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788207252613"
+                },
+                {
+                  "stringValue": "1788207390006"
+                },
+                {
+                  "stringValue": "1788207295956"
+                }
+              ]
+            }
+          },
+          "1788207442857": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788206742205"
+                },
+                {
+                  "stringValue": "1788207058375"
+                }
+              ]
+            }
+          },
+          "1788206742205": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788207442857"
+                },
+                {
+                  "stringValue": "1788207058375"
+                }
+              ]
+            }
+          },
+          "1788207058375": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "d80C1NGo0U2cHMejI70Z"
+                },
+                {
+                  "stringValue": "1788207442857"
+                },
+                {
+                  "stringValue": "1788206742205"
+                }
+              ]
+            }
+          },
+          "d80C1NGo0U2cHMejI70Z": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "1788207252613"
+                },
+                {
+                  "stringValue": "1788207390006"
+                },
+                {
+                  "stringValue": "1788207295956"
+                },
+                {
+                  "stringValue": "1788207544914"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "updatedAt": {
+      "integerValue": "1788491861022"
+    }
+  },
+  "createTime": "2026-09-04T03:08:37.471297Z",
+  "updateTime": "2026-09-04T03:17:41.232420Z"
+}

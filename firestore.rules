@@ -103,5 +103,15 @@ service cloud.firestore {
       allow update: if isManager() && isValidId(seatId) && isValidSeat(incoming());
       allow delete: if isSuperAdmin() && isValidId(seatId);
     }
+    
+    match /searchMappings/{mappingId} {
+      allow read: if true;
+      allow write: if true; // Demo mode: anyone can write mappings
+    }
+    
+    match /system/{document=**} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

@@ -39,6 +39,7 @@ import {
   Truck,
   BadgeCheck,
   Tag,
+  Sparkles,
 } from "lucide-react";
 import { AdminLogin } from "./components/AdminLogin";
 import { AdminDashboard } from "./components/AdminDashboard";
@@ -106,12 +107,33 @@ function MainContent() {
   const [hasMoreProducts, setHasMoreProducts] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [learnedSearches, setLearnedSearches] = useState<Record<string, {ids: string[], terms: string[]}>>({});
+  const [recommendations, setRecommendations] = useState<Record<string, string[]>>({});
+  const [lastSyncHash, setLastSyncHash] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
   const categories = useMemo(() => {
     const cats = Array.from(new Set(products.map((p) => p.category).filter(Boolean)));
     return ["All", ...cats];
   }, [products]);
+
+  const connectedProducts = useMemo(() => {
+    if (displayedProducts.length === 0) return [];
+    
+    const connectedIds = new Set<string>();
+    displayedProducts.forEach(p => {
+      const rels = recommendations[p.id] || [];
+      rels.forEach(r => connectedIds.add(r));
+    });
+    
+    // Remove products that are already in the main search results
+    displayedProducts.forEach(p => connectedIds.delete(p.id));
+    
+    // Map to actual current products (automatically handles deleted products by filtering Boolean)
+    return Array.from(connectedIds)
+      .map(id => products.find(p => p.id === id))
+      .filter(Boolean) as Product[];
+  }, [searchQuery, displayedProducts, recommendations, products]);
 
   // Order State
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -242,7 +264,7 @@ function MainContent() {
       }
     });
 
-    const unsubProds = onSnapshot(query(collection(db, "products")), (snap) => {
+    const unsubProds = onSnapshot(query(collection(db, "products"), limit(40)), (snap) => {
       currentProdSnap = snap;
       processData();
     }, (err: any) => {
@@ -251,11 +273,53 @@ function MainContent() {
       }
     });
 
+    const unsubLearnings = onSnapshot(collection(db, "searchMappings"), (snap) => {
+      const mappings: Record<string, {ids: string[], terms: string[]}> = {};
+      snap.forEach(doc => {
+        const data = doc.data();
+        if (data.query) {
+          mappings[data.query.toLowerCase()] = { ids: data.ids || [], terms: data.terms || [] };
+        }
+      });
+      setLearnedSearches(mappings);
+    }, (err: any) => {
+      console.warn("Learnings fetch error:", err);
+    });
+
+    const unsubRecommendations = onSnapshot(doc(db, "system", "recommendations"), (docSnap) => {
+      if (docSnap.exists()) {
+        setRecommendations(docSnap.data().relations || {});
+      }
+    }, (err: any) => {
+      console.warn("Recommendations fetch error:", err);
+    });
+
     return () => {
       unsubCats();
       unsubProds();
+      unsubLearnings();
+      unsubRecommendations();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const hash = products.map(p => p.id + p.name + p.category).join('|') + dbCategories.map(c => c.id + c.nameEn).join('|');
+    if (hash && hash !== lastSyncHash) {
+      // Trigger catalog relations sync
+      fetch('/api/analyze-catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products, categories: dbCategories })
+      })
+      .then(res => res.json())
+      .then(relations => {
+        setDoc(doc(db, "system", "recommendations"), { relations, updatedAt: Date.now() });
+      })
+      .catch(err => console.error("Failed to sync catalog relations:", err));
+    }
+    if (hash) setLastSyncHash(hash);
+  }, [products, dbCategories, isAdmin, lastSyncHash]);
 
   const loadMoreProducts = async () => {
     if (!lastProductDoc) return;
@@ -351,13 +415,115 @@ function MainContent() {
       return;
     }
 
-    // 2. Instant local search on categoryMatches
-    const localMatches = categoryMatches.filter(
+    // 2. Instant local search on categoryMatches for smooth typing
+    let localMatches = categoryMatches.filter(
       (p) =>
         p.name.toLowerCase().includes(lowerQuery) ||
         p.category.toLowerCase().includes(lowerQuery),
     );
+
+    // 2.5. Apply learned AI mappings (fast local lookup)
+    let hasExactLearnedMatch = false;
+    
+    // Check if we already have an exact learned search mapping
+    if (learnedSearches[lowerQuery]) {
+      hasExactLearnedMatch = true;
+      const learnedIds = learnedSearches[lowerQuery].ids;
+      const learnedProducts = products.filter(p => learnedIds.includes(p.id) && !localMatches.find(lm => lm.id === p.id));
+      localMatches = [...localMatches, ...learnedProducts];
+    } else {
+      // Fuzzy mapping check based on terms
+      const matchingLearnedIds = new Set<string>();
+      Object.entries(learnedSearches).forEach(([learnedQuery, data]) => {
+        // If query is similar or matches learned terms
+        if ((lowerQuery.length >= 3 && learnedQuery.includes(lowerQuery)) || data.terms.some(t => t.toLowerCase().includes(lowerQuery))) {
+           data.ids.forEach(id => matchingLearnedIds.add(id));
+        }
+      });
+      if (matchingLearnedIds.size > 0) {
+        const learnedProducts = products.filter(p => matchingLearnedIds.has(p.id) && !localMatches.find(lm => lm.id === p.id));
+        localMatches = [...localMatches, ...learnedProducts];
+      }
+    }
+
     setDisplayedProducts(localMatches);
+
+    // If we have an exact cached match, we don't need to ping AI again
+    if (hasExactLearnedMatch) {
+      setIsSearching(false);
+      return;
+    }
+
+    // 3. Debounced AI Deep Search
+    setIsSearching(true);
+    const abortController = new AbortController();
+
+    const performAISearch = async () => {
+      try {
+        const minimalSearchCatalog = products.map(p => ({
+          id: p.id,
+          name: p.name,
+          nameHi: p.nameHi,
+          category: p.category
+        }));
+
+        const res = await fetch('/api/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: searchQuery, products: minimalSearchCatalog }),
+          signal: abortController.signal
+        });
+        
+        if (!res.ok) throw new Error('AI search failed');
+        
+        const data = await res.json();
+        
+        if (data.ids && Array.isArray(data.ids) && data.ids.length > 0) {
+          // Replace instant matches with AI matches preserving AI's intelligent order
+          // Filter by selectedCategory to respect the user's active filter
+          let aiMatches = data.ids.map((id: string) => products.find(p => p.id === id)).filter(Boolean) as Product[];
+          if (selectedCategory !== "All") {
+            aiMatches = aiMatches.filter(p => p.category === selectedCategory);
+          }
+          if (aiMatches.length > 0) {
+            setDisplayedProducts(aiMatches);
+            
+            // Save to database for future local mapping learning
+            const safeId = lowerQuery.replace(/[^a-z0-9]/gi, '_');
+            if (safeId) {
+              try {
+                await setDoc(doc(db, "searchMappings", safeId), {
+                  query: lowerQuery,
+                  ids: data.ids,
+                  terms: data.terms || [],
+                  timestamp: Date.now()
+                }, { merge: true });
+              } catch (e) {
+                console.error("Failed to save search learning:", e);
+              }
+            }
+          }
+        }
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          console.error("AI Search fallback triggered:", error);
+          // Local matches are already displayed, so no fallback action is strictly needed here
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      performAISearch();
+    }, 250);
+
+    return () => {
+      clearTimeout(timeoutId);
+      abortController.abort();
+    };
   }, [searchQuery, products, selectedCategory]);
 
   // --- ACTIONS ---
@@ -564,6 +730,16 @@ function MainContent() {
                 </button>
               )}
             </div>
+            {isSearching && displayedProducts.length > 0 && (
+              <div className="mt-2.5 flex justify-center items-center gap-2 text-[#0e783a] animate-pulse">
+                <div className="flex gap-0.5">
+                  <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></div>
+                  <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
+                  <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
+                </div>
+                <span className="text-[10px] font-bold tracking-[0.1em] uppercase">AI Deep Search...</span>
+              </div>
+            )}
           </div>
 
           <div className="max-w-md mx-auto px-4 overflow-x-auto no-scrollbar flex items-center gap-2">
@@ -680,8 +856,99 @@ function MainContent() {
             </div>
           )}
 
-          {isSearching && (
-            <div className={`flex flex-col items-center justify-center ${displayedProducts.length > 0 ? 'py-8' : 'py-24'} px-4`}>
+          {connectedProducts.length > 0 && (
+            <div className="mt-8 mb-4">
+              <div className="flex items-center gap-2 mb-3 px-1">
+                <Sparkles className="w-5 h-5 text-purple-500" />
+                <h3 className="text-lg font-bold text-gray-800">Frequently Bought Together</h3>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {connectedProducts.map((product) => {
+                  const qty = getQuantity(product.id);
+                  return (
+                    <div
+                      key={product.id}
+                      className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between h-full relative"
+                    >
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProduct(product);
+                          }}
+                          className="absolute -top-1 -right-1 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-500 hover:text-[#0e783a]"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      
+                      <div>
+                        <div className={`w-full aspect-square bg-gray-50 rounded-xl mb-2 flex items-center justify-center text-4xl overflow-hidden border border-gray-100 relative ${product.isAvailable === false ? "grayscale opacity-60" : ""}`}>
+                          {product.isBestseller && (
+                            <div className="absolute top-1 left-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 z-10 shadow-sm shadow-red-500/20">
+                              <Flame className="w-2.5 h-2.5" /> Bestseller
+                            </div>
+                          )}
+                          {product.image?.startsWith("http") ||
+                          product.image?.startsWith("data:") ? (
+                            <img
+                              src={product.image}
+                              alt={product.name}
+                              className="w-full h-full object-cover" loading="lazy" decoding="async"
+                            />
+                          ) : (
+                            product.image
+                          )}
+                        </div>
+                        <h3 className="font-medium text-gray-900 text-xs leading-tight mb-1 line-clamp-2">
+                          {product.name}
+                        </h3>
+                        <p className="text-[10px] text-gray-400">
+                          {product.category}
+                        </p>
+                      </div>
+                      <div className="mt-2">
+                        <p className="text-[#0e783a] font-semibold text-sm mb-2">
+                          ₹{product.price}
+                        </p>
+                        {product.isAvailable === false ? (
+                          <div className="w-full text-center py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400">
+                            Out of Stock
+                          </div>
+                        ) : qty === 0 ? (
+                          <button
+                            onClick={() => updateQuantity(product.id, 1)}
+                            className="w-full border border-[#0e783a] text-[#0e783a] bg-[#0e783a]/5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-[#0e783a]/10 transition-colors"
+                          >
+                            Add
+                          </button>
+                        ) : (
+                          <div className="flex items-center justify-between bg-[#0e783a] text-white rounded-lg px-1 py-1 h-[30px]">
+                            <button
+                              onClick={() => updateQuantity(product.id, -1)}
+                              className="w-6 h-6 flex items-center justify-center active:scale-90"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="text-xs font-bold">{qty}</span>
+                            <button
+                              onClick={() => updateQuantity(product.id, 1)}
+                              className="w-6 h-6 flex items-center justify-center active:scale-90"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {isSearching && displayedProducts.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-24 px-4">
               <div className="relative w-16 h-16 flex items-center justify-center">
                 <div className="absolute inset-0 rounded-full border-[2px] border-dashed border-[#0e783a]/30 animate-[spin_4s_linear_infinite]"></div>
                 <div className="absolute inset-1.5 rounded-full border-[1.5px] border-[#0e783a]/20 border-t-[#0e783a] border-l-[#0e783a] animate-[spin_1.5s_cubic-bezier(0.68,-0.55,0.26,1.55)_infinite]"></div>

@@ -219,7 +219,7 @@ export function CategoryManagement() {
               placeholder="English Name"
               required
               value={nameEn}
-              onChange={(e) => setNameEn(e.target.value)}
+              onChange={(e) => setNameEn(e.target.value.toUpperCase())}
               className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200"
             />
             <input
@@ -227,7 +227,7 @@ export function CategoryManagement() {
               placeholder="Hindi Name"
               required
               value={nameHi}
-              onChange={(e) => setNameHi(e.target.value)}
+              onChange={(e) => setNameHi(e.target.value.toUpperCase())}
               className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200"
             />
           </div>

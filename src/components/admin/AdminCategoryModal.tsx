@@ -296,7 +296,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                   placeholder="English Name (e.g. Grocery)"
                   required
                   value={nameEn}
-                  onChange={(e) => setNameEn(e.target.value)}
+                  onChange={(e) => setNameEn(e.target.value.toUpperCase())}
                   className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 />
                 <input
@@ -304,7 +304,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                   placeholder="Hindi Name (e.g. किराना)"
                   required
                   value={nameHi}
-                  onChange={(e) => setNameHi(e.target.value)}
+                  onChange={(e) => setNameHi(e.target.value.toUpperCase())}
                   className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 />
               </div>
