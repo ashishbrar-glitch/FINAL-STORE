@@ -58,13 +58,17 @@ export async function processImageToBase64(file: File | Blob): Promise<string> {
           return reject(new Error("Canvas not supported in this browser"));
         }
         
-        ctx.fillStyle = '#FFFFFF'; // Fill white background for transparent PNGs converted to JPEG
-        ctx.fillRect(0, 0, width, height);
+        // If webp supports transparency, we don't strictly need white background, 
+        // but it's safe to keep it, or we can just draw image directly. Let's just draw image directly to keep transparency if needed, 
+        // wait, if we fill white, transparent PNGs become white.
+        // Let's remove the white fill to preserve transparency in WebP.
+        // ctx.fillStyle = '#FFFFFF';
+        // ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        // 5. Get highly compressed Base64 JPEG string
-        // 0.6 quality at 800px max dimension guarantees a very small payload (<100KB)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+        // 5. Get highly compressed Base64 WebP string
+        // 0.8 quality at 800px max dimension guarantees a small payload with good quality
+        const dataUrl = canvas.toDataURL('image/webp', 0.8);
         resolve(dataUrl);
       };
       

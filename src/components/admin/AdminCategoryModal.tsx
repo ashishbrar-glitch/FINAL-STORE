@@ -27,6 +27,28 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
   const [emoji, setEmoji] = useState(category?.emoji || '');
   const [displayOrder, setDisplayOrder] = useState(category?.displayOrder || 0);
   const [isActive, setIsActive] = useState(category?.isActive ?? true);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const handleTranslate = async () => {
+    if (!nameEn) return;
+    setIsTranslating(true);
+    try {
+      const res = await fetch("/api/translate-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: nameEn, type: "category" })
+      });
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      if (data.nameHi) setNameHi(data.nameHi.toUpperCase());
+      if (data.emoji && !emoji) setEmoji(data.emoji);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to auto-translate. Please enter manually.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
   
   const [imageState, setImageState] = useState<ImageState>('idle');
   const [cleanStatus, setCleanStatus] = useState("");
@@ -299,14 +321,25 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                   onChange={(e) => setNameEn(e.target.value.toUpperCase())}
                   className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 />
-                <input
-                  type="text"
-                  placeholder="Hindi Name (e.g. किराना)"
-                  required
-                  value={nameHi}
-                  onChange={(e) => setNameHi(e.target.value.toUpperCase())}
-                  className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Hindi Name (e.g. किराना)"
+                    required
+                    value={nameHi}
+                    onChange={(e) => setNameHi(e.target.value.toUpperCase())}
+                    className="w-full text-sm px-4 py-3 pr-10 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTranslate}
+                    disabled={!nameEn || isTranslating}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-50 transition-colors"
+                    title="Auto-translate from English"
+                  >
+                    {isTranslating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <input

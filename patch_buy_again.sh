@@ -1,0 +1,1 @@
+sed -i 's/const \[hasMoreProducts, setHasMoreProducts\] = useState(true);/const [hasMoreProducts, setHasMoreProducts] = useState(true);\n  const [pastPurchasedIds, setPastPurchasedIds] = useState<string[]>([]);/' src/App.tsx

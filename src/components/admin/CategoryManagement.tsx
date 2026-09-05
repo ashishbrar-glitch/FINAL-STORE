@@ -17,6 +17,7 @@ import {
   Loader2,
   X,
   Image as ImageIcon,
+  Wand2,
 } from "lucide-react";
 import { processImageToBase64 } from '../../lib/imageProcessor';
 
@@ -36,6 +37,28 @@ export function CategoryManagement() {
   const [nameHi, setNameHi] = useState("");
   const [emoji, setEmoji] = useState("");
   const [displayOrder, setDisplayOrder] = useState("");
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const handleTranslate = async () => {
+    if (!nameEn) return;
+    setIsTranslating(true);
+    try {
+      const res = await fetch("/api/translate-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: nameEn, type: "category" })
+      });
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      if (data.nameHi) setNameHi(data.nameHi.toUpperCase());
+      if (data.emoji && !emoji) setEmoji(data.emoji);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to auto-translate. Please enter manually.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
   
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -222,14 +245,25 @@ export function CategoryManagement() {
               onChange={(e) => setNameEn(e.target.value.toUpperCase())}
               className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200"
             />
-            <input
-              type="text"
-              placeholder="Hindi Name"
-              required
-              value={nameHi}
-              onChange={(e) => setNameHi(e.target.value.toUpperCase())}
-              className="w-full text-sm px-3 py-2 rounded-xl border border-gray-200"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Hindi Name"
+                required
+                value={nameHi}
+                onChange={(e) => setNameHi(e.target.value.toUpperCase())}
+                className="w-full text-sm px-3 py-2 pr-10 rounded-xl border border-gray-200"
+              />
+              <button
+                type="button"
+                onClick={handleTranslate}
+                disabled={!nameEn || isTranslating}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-50 transition-colors"
+                title="Auto-translate from English"
+              >
+                {isTranslating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

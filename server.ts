@@ -121,6 +121,48 @@ Return an empty array for ids if none match. Do NOT wrap it in markdown block qu
     }
   });
 
+  app.post("/api/translate-admin", async (req, res) => {
+    try {
+      const { text, type } = req.body;
+      if (!text) {
+        return res.status(400).json({ error: "Missing text" });
+      }
+
+      const ai = getAiClient();
+      let prompt = "";
+      
+      if (type === "category") {
+        prompt = `Translate the following English category name to Hindi, and provide a single relevant emoji.
+        Category: "${text}"
+        Return ONLY valid JSON matching this schema: { "nameHi": "Hindi name here", "emoji": "🍎" }`;
+      } else {
+        prompt = `Translate the following English product name to Hindi.
+        Product: "${text}"
+        Return ONLY valid JSON matching this schema: { "nameHi": "Hindi name here" }`;
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: prompt,
+        config: {
+          temperature: 0.2,
+          responseMimeType: "application/json",
+        }
+      });
+
+      let responseText = response.text || "{}";
+      try {
+        const json = JSON.parse(responseText);
+        res.json(json);
+      } catch (e) {
+        res.status(500).json({ error: "Invalid JSON from AI" });
+      }
+    } catch (error) {
+      console.error("Translate API Error:", error);
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
   app.post("/api/analyze-catalog", async (req, res) => {
     try {
       const { products, categories } = req.body;

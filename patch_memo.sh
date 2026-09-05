@@ -1,0 +1,1 @@
+sed -i 's/const handleSendBooking = () => {/const buyAgainProducts = useMemo(() => {\n    return products.filter(p => pastPurchasedIds.includes(p.id) \&\& p.isActive !== false);\n  }, [products, pastPurchasedIds]);\n\n  const handleSendBooking = () => {/' src/App.tsx

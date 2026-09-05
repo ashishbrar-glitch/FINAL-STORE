@@ -1,0 +1,1 @@
+sed -i 's/const \[isSearching, setIsSearching\] = useState(false);/const [isSearching, setIsSearching] = useState(false);\n\n  useEffect(() => {\n    try {\n      const saved = localStorage.getItem("bcn_past_purchases");\n      if (saved) {\n        setPastPurchasedIds(JSON.parse(saved));\n      }\n    } catch(e) {}\n  }, []);/' src/App.tsx

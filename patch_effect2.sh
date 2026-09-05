@@ -1,0 +1,1 @@
+sed -i 's/const \[crossSellSource, setCrossSellSource\] = useState<Product | null>(null);/const [crossSellSource, setCrossSellSource] = useState<Product | null>(null);\n\n  useEffect(() => {\n    if (currentView !== "home") {\n      setCrossSellSource(null);\n    }\n  }, [currentView]);/' src/App.tsx

@@ -24,10 +24,32 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [name, setName] = useState(product?.name || '');
+  const [nameHi, setNameHi] = useState(product?.nameHi || '');
   const [price, setPrice] = useState(product?.price || 0);
   const [category, setCategory] = useState(product?.categoryId || product?.category || '');
   const [isAvailable, setIsAvailable] = useState(product?.isAvailable ?? true);
   const [isBestseller, setIsBestseller] = useState(product?.isBestseller ?? false);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const handleTranslate = async () => {
+    if (!name) return;
+    setIsTranslating(true);
+    try {
+      const res = await fetch("/api/translate-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: name, type: "product" })
+      });
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      if (data.nameHi) setNameHi(data.nameHi.toUpperCase());
+    } catch (e) {
+      console.error(e);
+      alert("Failed to auto-translate. Please enter manually.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
   
   // Image Editor State
   const [imageState, setImageState] = useState<ImageState>('idle');
@@ -253,7 +275,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
         imageUrl: finalImageUrl,
         isAvailable,
         isBestseller,
-        nameHi: product?.nameHi || '',
+        nameHi: nameHi || product?.nameHi || '',
         mrp: product?.mrp || 0,
         unit: product?.unit || 'pc',
         isActive: product?.isActive ?? true,
@@ -301,14 +323,34 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
             
             {/* 1. Product Details */}
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-              <input
-                type="text"
-                placeholder="Product Name"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value.toUpperCase())}
-                className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  placeholder="Product Name"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value.toUpperCase())}
+                  className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Hindi Name"
+                    value={nameHi}
+                    onChange={(e) => setNameHi(e.target.value.toUpperCase())}
+                    className="w-full text-sm px-4 py-3 pr-10 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTranslate}
+                    disabled={!name || isTranslating}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg disabled:opacity-50 transition-colors"
+                    title="Auto-translate from English"
+                  >
+                    {isTranslating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
               <div className="flex gap-3">
                 <input
                   type="number"

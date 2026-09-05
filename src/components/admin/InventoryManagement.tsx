@@ -18,6 +18,8 @@ import {
   Loader2,
   Image as ImageIcon,
   X,
+  Download,
+  Upload,
 } from "lucide-react";
 import imageCompression from "browser-image-compression";
 
@@ -121,6 +123,82 @@ export function InventoryManagement() {
     setShowAddForm(false);
   };
 
+  const handleExportCSV = () => {
+    if (products.length === 0) return;
+    const headers = ["id", "name", "nameHi", "price", "mrp", "category", "categoryId", "isAvailable", "isBestseller", "imageUrl", "unit"];
+    const rows = products.map(p => {
+      return headers.map(h => {
+        let val = p[h] ?? "";
+        if (typeof val === "string") val = val.replace(/"/g, '""');
+        return `"${val}"`;
+      }).join(",");
+    });
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "products_export.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!window.confirm("Are you sure you want to import this CSV? This will OVERWRITE existing products with matching IDs and add new ones.")) {
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const lines = text.split("\n").filter(l => l.trim().length > 0);
+      if (lines.length < 2) throw new Error("CSV has no data");
+      
+      const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+      let successCount = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        // Simple CSV parser that respects quotes
+        const line = lines[i];
+        let values: string[] = [];
+        let inQuotes = false;
+        let curr = "";
+        for (let char of line) {
+          if (char === '"') inQuotes = !inQuotes;
+          else if (char === ',' && !inQuotes) { values.push(curr); curr = ""; }
+          else curr += char;
+        }
+        values.push(curr);
+
+        const data: any = {};
+        headers.forEach((h, idx) => {
+          let val = values[idx]?.replace(/^"|"$/g, "").replace(/""/g, '"');
+          if (val === "true") data[h] = true;
+          else if (val === "false") data[h] = false;
+          else if (h === "price" || h === "mrp") data[h] = val ? Number(val) : 0;
+          else data[h] = val;
+        });
+
+        if (!data.name) continue;
+
+        const docRef = data.id ? doc(collection(db, "products"), data.id) : doc(collection(db, "products"));
+        await setDoc(docRef, { ...data, updatedAt: new Date() }, { merge: true });
+        successCount++;
+      }
+      alert(`Successfully imported/updated ${successCount} products!`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse CSV file.");
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   const handleEdit = (product: any) => {
     setModalProduct(product);
     setIsModalOpen(true);
@@ -200,15 +278,29 @@ export function InventoryManagement() {
 
   return (
     <div id="inventory-section" className="space-y-4 scroll-mt-20">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">Inventory</h3>
-        <button
-          onClick={() => { setModalProduct(null); setIsModalOpen(true); }}
-          className="flex items-center gap-1 text-sm bg-green-50 text-[#0e783a] px-3 py-1.5 rounded-lg font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          Add Item
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-sm bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-medium cursor-pointer hover:bg-gray-100 transition-colors">
+            <Upload className="w-4 h-4" />
+            Import CSV
+            <input type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
+          </label>
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1 text-sm bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-medium hover:bg-gray-100 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => { setModalProduct(null); setIsModalOpen(true); }}
+            className="flex items-center gap-1 text-sm bg-green-50 text-[#0e783a] px-3 py-1.5 rounded-lg font-medium hover:bg-green-100 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Item
+          </button>
+        </div>
       </div>
 
       {isModalOpen && (
