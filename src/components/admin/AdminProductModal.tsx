@@ -25,6 +25,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
   
   const [name, setName] = useState(product?.name || '');
   const [nameHi, setNameHi] = useState(product?.nameHi || '');
+  const [nameEn, setNameEn] = useState(product?.nameEn || '');
   const [price, setPrice] = useState(product?.price || 0);
   const [category, setCategory] = useState(product?.categoryId || product?.category || '');
   const [isAvailable, setIsAvailable] = useState(product?.isAvailable ?? true);
@@ -163,12 +164,14 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
          maskCtx.putImageData(imgData, 0, 0);
       }
 
+      const objectUrl = URL.createObjectURL(fileToProcess);
       const originalImg = new Image();
       await new Promise((resolve, reject) => { 
         originalImg.onload = resolve; 
         originalImg.onerror = () => reject(new Error("The source image could not be decoded."));
-        originalImg.src = dataUrl;
+        originalImg.src = objectUrl;
       });
+      URL.revokeObjectURL(objectUrl);
       
       const outCanvas = document.createElement('canvas');
       outCanvas.width = originalImg.width;
@@ -240,7 +243,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
     return dataUrl;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, overrideMode?: "original" | "generated" | "existing") => {
     e.preventDefault();
     setErrorMsg("");
     
@@ -251,7 +254,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
     
     setLoading(true);
     setUploadStatus("Starting upload...");
-    const mode = submitMode;
+    const mode = overrideMode || submitMode;
     
     try {
       let finalImageUrl = originalPreview || "";
@@ -276,6 +279,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
         isAvailable,
         isBestseller,
         nameHi: nameHi || product?.nameHi || '',
+        nameEn: nameEn || product?.nameEn || '',
         mrp: product?.mrp || 0,
         unit: product?.unit || 'pc',
         isActive: product?.isActive ?? true,
@@ -297,7 +301,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
       
     } catch (err) {
       console.error(err);
-      alert("Error saving product");
+      alert("Error saving product: " + (err instanceof Error ? err.message : String(err)));
       setLoading(false);
       setUploadStatus("");
     }
@@ -314,7 +318,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
         </div>
         
         <div className="p-5 overflow-y-auto custom-scrollbar">
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={(e) => handleSubmit(e, "existing")} className="space-y-6">
             {errorMsg && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl border border-red-100 text-sm font-semibold flex items-center gap-2">
                 <AlertCircle className="w-5 h-5" /> {errorMsg}
@@ -330,6 +334,13 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value.toUpperCase())}
+                  className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                />
+                <input
+                  type="text"
+                  placeholder="English Name / AI Search Keywords"
+                  value={nameEn}
+                  onChange={(e) => setNameEn(e.target.value.toLowerCase())}
                   className="w-full text-sm px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 />
                 <div className="relative">
@@ -513,17 +524,17 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
                
                {!loading && originalImageFile && (
                   <div className="flex flex-col sm:flex-row gap-3">
-                    <button type="submit" onClick={() => setSubmitMode('original')} className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3.5 rounded-xl font-bold text-sm hover:bg-gray-50 shadow-sm transition-all active:scale-[0.98]">
+                    <button type="button" onClick={(e) => handleSubmit(e as any, 'original')} className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3.5 rounded-xl font-bold text-sm hover:bg-gray-50 shadow-sm transition-all active:scale-[0.98]">
                        Upload Original
                     </button>
-                    <button type="submit" onClick={() => setSubmitMode('generated')} disabled={imageState !== 'generated'} className="flex-1 bg-blue-600 border-2 border-blue-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+                    <button type="button" onClick={(e) => handleSubmit(e as any, 'generated')} disabled={imageState !== 'generated'} className="flex-1 bg-blue-600 border-2 border-blue-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
                        <Wand2 className="w-4 h-4" /> Upload Generated
                     </button>
                   </div>
                )}
                
                {!loading && !originalImageFile && (
-                  <button type="submit" onClick={() => setSubmitMode('existing')} className="w-full bg-[#0e783a] text-white py-3.5 rounded-xl font-bold text-sm hover:bg-[#0c6631] shadow-sm transition-all active:scale-[0.98]">
+                  <button type="button" onClick={(e) => handleSubmit(e as any, 'existing')} className="w-full bg-[#0e783a] text-white py-3.5 rounded-xl font-bold text-sm hover:bg-[#0c6631] shadow-sm transition-all active:scale-[0.98]">
                      {product ? "Update Item" : "Add Item"}
                   </button>
                )}

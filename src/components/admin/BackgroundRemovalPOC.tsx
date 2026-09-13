@@ -161,12 +161,14 @@ export function BackgroundRemovalPOC({ onClose }: Props) {
       }
 
       // 2. Load original image to canvas
+      const objectUrl = URL.createObjectURL(fileToProcess);
       const originalImg = new Image();
       await new Promise((resolve, reject) => { 
         originalImg.onload = resolve; 
         originalImg.onerror = () => reject(new Error("The source image could not be decoded."));
-        originalImg.src = imgUrl;
+        originalImg.src = objectUrl;
       });
+      URL.revokeObjectURL(objectUrl);
       
       const outCanvas = document.createElement('canvas');
       outCanvas.width = originalImg.width;

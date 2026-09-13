@@ -160,12 +160,14 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
          maskCtx.putImageData(imgData, 0, 0);
       }
 
+      const objectUrl = URL.createObjectURL(fileToProcess);
       const originalImg = new Image();
       await new Promise((resolve, reject) => { 
         originalImg.onload = resolve; 
         originalImg.onerror = () => reject(new Error("The source image could not be decoded."));
-        originalImg.src = dataUrl;
+        originalImg.src = objectUrl;
       });
+      URL.revokeObjectURL(objectUrl);
       
       const outCanvas = document.createElement('canvas');
       outCanvas.width = originalImg.width;

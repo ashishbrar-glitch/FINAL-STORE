@@ -1,77 +1,78 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/App.tsx', 'utf-8');
 
-// 1. Remove the "Buy Again" block from Home view
-const startMarker = `{buyAgainProducts.length > 0 && selectedCategory === "All" && !searchQuery && (`;
-const endMarker = `        {/* Categories */}`;
+const regex = /<div key=\{product\.id\} className="min-w-\[140px\] w-\[140px\] snap-start">[\s\S]*?<\/div>\s*<\/div>\s*\);/g;
 
-const startIndex = code.indexOf(startMarker);
-if (startIndex !== -1) {
-  const endIndex = code.indexOf(endMarker, startIndex);
-  if (endIndex !== -1) {
-    code = code.substring(0, startIndex) + code.substring(endIndex);
-  }
-}
-
-// 2. Insert into Order Items view, right after Categories in the sticky header
-// Or maybe below the sticky header, before the product grid
-const orderInsertionPoint = `        <div className="p-4 max-w-md mx-auto">
-          
-          {isAdmin && (`;
-const replacementStr = `        <div className="p-4 max-w-md mx-auto">
-          
-          {buyAgainProducts.length > 0 && selectedCategory === "All" && !searchQuery && (
-            <div className="pb-6">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <h2 className="text-[15px] font-extrabold text-gray-900 flex items-center gap-2"><Star className="w-4 h-4 text-orange-400 fill-current" /> Buy Again</h2>
-              </div>
-              <div className="flex overflow-x-auto gap-4 pb-2 snap-x hide-scrollbar -mx-4 px-4">
-                {buyAgainProducts.map(product => {
-                  const cartItem = cart.find((item) => item.id === product.id);
-                  const quantity = cartItem ? cartItem.quantity : 0;
-                  return (
-                    <div key={product.id} className="min-w-[140px] w-[140px] snap-start">
-                      <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between h-full relative">
-                        <div>
-                          <div className="aspect-square bg-gray-50 rounded-xl mb-2 overflow-hidden flex items-center justify-center relative">
-                            {product.image ? (
-                              <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+const newBuyAgainCard = `<div key={product.id} className="min-w-[130px] w-[130px] snap-start">
+                      <div className="bg-white p-2 rounded-[16px] shadow-sm hover:shadow-md border border-gray-100 flex flex-col justify-between h-full relative transition-all duration-300">
+                        <div className="flex flex-col">
+                          <div className={\`w-full aspect-square bg-[#F4F6F8] rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative \${product.isAvailable === false ? "grayscale opacity-50" : ""}\`}>
+                            {product.isBestseller && (
+                              <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
+                                Bestseller
+                              </div>
+                            )}
+                            {product.image?.startsWith("http") ||
+                            product.image?.startsWith("data:") ? (
+                              <img
+                                src={product.image}
+                                alt={product.name}
+                                className="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
+                              />
                             ) : (
-                              <span className="text-3xl font-bold text-gray-400">{product.name.charAt(0)}</span>
+                              <div className="w-full h-full flex items-center justify-center">{product.image}</div>
                             )}
                           </div>
-                          <h3 className="font-bold text-gray-900 text-[13px] leading-tight line-clamp-2 min-h-[30px]">{product.name}</h3>
-                          {product.nameHi && <p className="text-[10px] text-gray-500 truncate mt-0.5">{product.nameHi}</p>}
+                          <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
+                            {product.name}
+                          </h3>
+                          <p className="text-[10px] text-gray-500 mt-1 truncate">
+                            {product.unit ? product.unit : product.category}
+                          </p>
                         </div>
-                        <div className="flex items-center justify-between mt-3">
-                          <p className="font-extrabold text-[#0e783a] text-sm">₹{product.price}</p>
-                          {quantity === 0 ? (
+                        <div className="mt-2 flex items-end justify-between">
+                          <div className="flex flex-col">
+                            {product.mrp && product.mrp > product.price && (
+                              <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{product.mrp}</span>
+                            )}
+                            <span className="text-gray-900 font-bold text-[14px] leading-none">
+                              ₹{product.price}
+                            </span>
+                          </div>
+                          
+                          {product.isAvailable === false ? (
+                            <div className="px-2 py-1 rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400">
+                              Out
+                            </div>
+                          ) : quantity === 0 ? (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                updateQuantity(product.id, 1);
-                              }}
-                              className="w-7 h-7 flex items-center justify-center bg-[#0e783a] text-white rounded-lg shadow-sm hover:bg-[#0c6631] active:scale-95 transition-transform"
+                              onClick={() => updateQuantity(product.id, 1)}
+                              className="px-3 py-1 rounded-lg border border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10 text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95"
                             >
-                              <Plus className="w-4 h-4" />
+                              ADD
                             </button>
                           ) : (
-                            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
-                              <button onClick={(e) => { e.stopPropagation(); updateQuantity(product.id, -1); }} className="w-6 h-6 flex items-center justify-center text-[#0e783a] bg-white rounded shadow-sm hover:bg-gray-50 active:scale-95"><Minus className="w-3 h-3" /></button>
-                              <span className="w-5 text-center text-xs font-bold text-gray-900">{quantity}</span>
-                              <button onClick={(e) => { e.stopPropagation(); updateQuantity(product.id, 1); }} className="w-6 h-6 flex items-center justify-center text-[#0e783a] bg-white rounded shadow-sm hover:bg-gray-50 active:scale-95"><Plus className="w-3 h-3" /></button>
+                            <div className="flex items-center justify-between bg-[#187D39] text-white rounded-lg px-1 py-1 h-[28px] min-w-[68px] shadow-sm">
+                              <button
+                                onClick={() => updateQuantity(product.id, -1)}
+                                className="w-6 h-6 flex items-center justify-center active:scale-90"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="text-[13px] font-bold px-1">{quantity}</span>
+                              <button
+                                onClick={() => updateQuantity(product.id, 1)}
+                                className="w-6 h-6 flex items-center justify-center active:scale-90"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           )}
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                  );`;
 
-          {isAdmin && (`;
-
-code = code.replace(orderInsertionPoint, replacementStr);
+code = code.replace(regex, newBuyAgainCard);
 fs.writeFileSync('src/App.tsx', code);
+console.log("Patched buyAgain");

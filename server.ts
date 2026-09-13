@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 dotenv.config();
 
@@ -35,7 +36,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   app.get("/api/products", (req, res) => {
     res.json(PRODUCTS);
@@ -53,6 +55,7 @@ async function startServer() {
         id: p.id,
         name: p.name,
         nameHi: p.nameHi,
+        nameEn: p.nameEn,
         category: p.category
       }));
 
@@ -62,6 +65,8 @@ Given the following products:
 ${JSON.stringify(minimalProducts)}
 
 The user searched for: "${query}".
+IMPORTANT INSTRUCTION: The 'name' field is often in a local language. The 'nameEn' field contains the proper English name and AI search keywords.
+If the user's query is in English, you MUST aggressively prioritize matching the query against the 'nameEn' and 'category' fields to find the perfect matches. 
 Identify spelling variations, similar words, Hindi/English variations, and intended product terms to find the best semantic matches.
 Return ONLY a JSON object with two fields:
 - "ids": an array of matching product IDs (e.g. ["1", "3"])
@@ -80,10 +85,11 @@ Return an empty array for ids if none match. Do NOT wrap it in markdown block qu
         });
       } catch (firstErr: any) {
         const errMsg = String(firstErr);
-        if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("404")) {
-          console.warn("Retrying with gemini-3.8-flash as fallback...");
+        if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("404") || errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+          console.warn("Retrying with gemini-3.1-flash-lite as fallback...");
+          await sleep(2000);
           response = await ai.models.generateContent({
-            model: "gemini-3.8-flash",
+            model: "gemini-3.1-flash-lite",
             contents: prompt,
             config: {
               responseMimeType: "application/json",
@@ -141,14 +147,28 @@ Return an empty array for ids if none match. Do NOT wrap it in markdown block qu
         Return ONLY valid JSON matching this schema: { "nameHi": "Hindi name here" }`;
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          temperature: 0.2,
-          responseMimeType: "application/json",
-        }
-      });
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: "gemini-3.1-flash-lite",
+          contents: prompt,
+          config: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+          }
+        });
+      } catch (firstErr: any) {
+        console.warn("Translation retry with gemini-3.1-flash-lite...");
+        await sleep(2000);
+        response = await ai.models.generateContent({
+          model: "gemini-3.1-flash-lite",
+          contents: prompt,
+          config: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+          }
+        });
+      }
 
       let responseText = response.text || "{}";
       try {
@@ -175,6 +195,7 @@ Return an empty array for ids if none match. Do NOT wrap it in markdown block qu
         id: p.id,
         name: p.name,
         nameHi: p.nameHi,
+        nameEn: p.nameEn,
         category: p.category
       }));
       
@@ -218,10 +239,11 @@ Do NOT wrap it in markdown block quotes.`;
         });
       } catch (firstErr: any) {
         const errMsg = String(firstErr);
-        if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("404")) {
+        if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("404") || errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
           console.warn("Retrying with fallback...");
+          await sleep(2000);
           response = await ai.models.generateContent({
-            model: "gemini-3.8-flash",
+            model: "gemini-3.1-flash-lite",
             contents: prompt,
             config: { responseMimeType: "application/json" }
           });

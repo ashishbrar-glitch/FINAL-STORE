@@ -50,6 +50,49 @@ import { db } from "./lib/firebase";
 import { AdminCategoryModal } from "./components/admin/AdminCategoryModal";
 import { AdminProductModal } from "./components/admin/AdminProductModal";
 
+const FunnySearchSkeleton = () => {
+  const loadingMessages = [
+    "AI is running down the aisles... 🏃💨",
+    "Asking the store manager... 👨‍💼",
+    "Looking behind the counter... 🔍",
+    "Checking the godown... 📦",
+    "Scanning the shelves... 🧐",
+  ];
+  const [msgIdx, React_useState] = React.useState(0);
+
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      React_useState(i => (i + 1) % loadingMessages.length);
+    }, 1800);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="w-full flex flex-col items-center pb-24 pt-4">
+      <div className="py-4 px-4 text-center mb-4">
+        <div className="inline-flex items-center gap-2 bg-[#0e783a]/10 px-4 py-2 rounded-full text-[#0e783a] font-bold text-xs tracking-wide">
+          <Sparkles className="w-4 h-4 animate-spin" />
+          <span className="min-w-[200px]">{loadingMessages[msgIdx]}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 w-full px-4">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="flex flex-col gap-2 relative">
+            <div className="w-full aspect-square bg-gray-200 rounded-xl animate-pulse flex flex-col items-center justify-center overflow-hidden">
+               <span className="text-4xl opacity-20 animate-bounce" style={{ animationDelay: `${i * 150}ms` }}>
+                 {['🛒', '🤔', '📦', '🔍', '🏃', '💡'][i-1]}
+               </span>
+            </div>
+            <div className="h-3 bg-gray-200 rounded animate-pulse w-3/4 mt-1"></div>
+            <div className="h-3 bg-gray-200 rounded animate-pulse w-1/2"></div>
+            <div className="absolute top-2 right-2 w-6 h-6 bg-gray-300 rounded-full animate-pulse"></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // --- TYPES ---
 type View =
   | "home"
@@ -64,6 +107,7 @@ type Product = {
   id: string;
   name: string;
   nameHi?: string;
+  nameEn?: string;
   price: number;
   mrp?: number;
   category: string;
@@ -439,7 +483,7 @@ function MainContent() {
       }
     });
 
-    const unsubProds = onSnapshot(query(collection(db, "products"), limit(40)), (snap) => {
+    const unsubProds = onSnapshot(query(collection(db, "products")), (snap) => {
       currentProdSnap = snap;
       processData();
     }, (err: any) => {
@@ -481,13 +525,34 @@ function MainContent() {
     if (!isAdmin) return;
     const hash = products.map(p => p.id + p.name + p.category).join('|') + dbCategories.map(c => c.id + c.nameEn).join('|');
     if (hash && hash !== lastSyncHash) {
+      const minimalProducts = products.map(p => ({
+        id: p.id,
+        name: p.name,
+        nameHi: p.nameHi,
+        nameEn: p.nameEn,
+        category: p.category
+      }));
+      
+      const minimalCategories = dbCategories.map(c => ({
+        id: c.id,
+        name: c.nameEn,
+        nameHi: c.nameHi,
+        description: c.description
+      }));
+
       // Trigger catalog relations sync
       fetch('/api/analyze-catalog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products, categories: dbCategories })
+        body: JSON.stringify({ products: minimalProducts, categories: minimalCategories })
       })
-      .then(res => res.json())
+      .then(async res => {
+        if (!res.ok) {
+           const text = await res.text();
+           throw new Error(text);
+        }
+        return res.json();
+      })
       .then(relations => {
         setDoc(doc(db, "system", "recommendations"), { relations, updatedAt: Date.now() });
       })
@@ -496,7 +561,7 @@ function MainContent() {
     if (hash) setLastSyncHash(hash);
   }, [products, dbCategories, isAdmin, lastSyncHash]);
 
-  const loadMoreProducts = async () => {
+  const loadMoreProducts = async () => { return; /* Disabled to load all */
     if (!lastProductDoc) return;
     
     const processSnapshot = (snapshot: any) => {
@@ -594,7 +659,8 @@ function MainContent() {
     let localMatches = categoryMatches.filter(
       (p) =>
         p.name.toLowerCase().includes(lowerQuery) ||
-        p.category.toLowerCase().includes(lowerQuery),
+        p.category.toLowerCase().includes(lowerQuery) ||
+        (p.nameEn && p.nameEn.toLowerCase().includes(lowerQuery)),
     );
 
     // 2.5. Apply learned AI mappings (fast local lookup)
@@ -639,6 +705,7 @@ function MainContent() {
           id: p.id,
           name: p.name,
           nameHi: p.nameHi,
+          nameEn: p.nameEn,
           category: p.category
         }));
 
@@ -664,7 +731,7 @@ function MainContent() {
             setDisplayedProducts(aiMatches);
             
             // Save to database for future local mapping learning
-            const safeId = lowerQuery.replace(/[^a-z0-9]/gi, '_');
+            const safeId = "q_" + encodeURIComponent(lowerQuery).replace(/\./g, '%2E');
             if (safeId) {
               try {
                 await setDoc(doc(db, "searchMappings", safeId), {
@@ -821,7 +888,7 @@ function MainContent() {
         {title === "BCN Store" ? (
           <div className="flex items-center gap-2.5">
             <div className="bg-white rounded-xl px-2 py-1 shadow-sm shrink-0">
-              <img src="/logo.png" alt="BCN Store Logo" className="h-8 sm:h-9 object-contain" />
+              <img src="/logo.png" alt="BCN Store Logo" className="h-8 sm:h-9 object-contain" fetchPriority="high" loading="eager" />
             </div>
             <div className="flex flex-col justify-center">
               <span className="text-[9px] font-extrabold text-[#EFC04E] uppercase tracking-widest leading-tight">Available in</span>
@@ -855,8 +922,7 @@ function MainContent() {
             <span className="hidden sm:inline">Offline</span>
           </div>
         )}
-        {rightElement || (
-          currentView !== "order" && (
+        {rightElement !== undefined ? rightElement : (
           <div className="flex items-center gap-2">
             <button
               onClick={handleInstallClick}
@@ -871,13 +937,18 @@ function MainContent() {
             >
               <ShoppingCart className="w-5 h-5" />
               {cart.length > 0 && (
-                <span className={`absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 ${iconBorderColor}`}>
+                <motion.span 
+                  key={cart.reduce((a, b) => a + b.quantity, 0)}
+                  initial={{ scale: 0.5 }}
+                  animate={{ scale: [1.5, 1] }}
+                  transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                  className={`absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full border-2 ${iconBorderColor}`}
+                >
                   {cart.reduce((a, b) => a + b.quantity, 0)}
-                </span>
+                </motion.span>
               )}
             </button>
           </div>
-        )
       )}
       </div>
     </header>
@@ -887,15 +958,7 @@ function MainContent() {
   const globalOverlays = (
     <>
       <AnimatePresence>
-        {crossSellSource && currentView !== "cart" && currentView !== "admin-dashboard" && (
-          <CrossSellToast
-            sourceProduct={crossSellSource}
-            recommendations={recommendations}
-            products={products}
-            onClose={() => setCrossSellSource(null)}
-            onAddToCart={updateQuantity}
-          />
-        )}
+        
       </AnimatePresence>
       {currentView !== "admin-dashboard" && (
         <a
@@ -931,6 +994,48 @@ function MainContent() {
         />
       )}
     </>
+  );
+
+  
+  const floatingCartFab = cart.length > 0 && (
+    <div className="fixed bottom-0 left-0 right-0 z-40 px-3 py-3 pointer-events-none">
+      <div className="max-w-md mx-auto relative pointer-events-auto">
+        <button
+          onClick={() => setCurrentView("cart")}
+          className="w-full bg-[#0c831f] text-white rounded-[16px] px-4 py-3 flex items-center justify-between shadow-[0_8px_20px_rgba(12,131,31,0.25)] active:scale-[0.98] transition-transform overflow-hidden relative"
+        >
+          {/* Shimmer effect */}
+          <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 -translate-x-[100%] animate-[shimmer_2s_infinite]"></div>
+          
+          <div className="flex items-center gap-3 relative z-10">
+            <div className="w-10 h-10 bg-black/10 rounded-[10px] flex items-center justify-center border border-white/10 backdrop-blur-sm shadow-inner">
+               <svg className="w-5 h-5 text-white fill-current drop-shadow-sm" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z" />
+               </svg>
+            </div>
+            <div className="flex flex-col items-start text-left">
+              <span className="font-bold text-[14px] leading-[1.1] flex items-center gap-1.5">
+                {cart.reduce((a, b) => a + b.quantity, 0)} ITEM{cart.reduce((a, b) => a + b.quantity, 0) > 1 ? 'S' : ''}
+              </span>
+              <motion.div
+                key={finalTotal}
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                className="text-[12px] font-medium text-green-100 flex items-center gap-1 whitespace-nowrap"
+              >
+                ₹{finalTotal} <span className="w-1 h-1 bg-green-200/50 rounded-full inline-block mx-0.5"></span> {itemsTotal < 250 ? `Add ₹${250 - itemsTotal} for FREE Delivery` : 'FREE Delivery applied'}
+              </motion.div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 relative z-10">
+            <span className="font-bold text-[14px]">View cart</span>
+            <ChevronRight className="w-5 h-5 text-white" />
+          </div>
+        </button>
+      </div>
+    </div>
   );
 
   if (currentView === "order") {
@@ -970,7 +1075,7 @@ function MainContent() {
                   <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
                   <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
                 </div>
-                <span className="text-[10px] font-bold tracking-[0.1em] uppercase">AI Deep Search...</span>
+                <span className="text-[10px] font-bold tracking-[0.1em] uppercase">AI is searching the aisles... 🏃💨</span>
               </div>
             )}
     </div>
@@ -1007,36 +1112,67 @@ function MainContent() {
                   const cartItem = cart.find((item) => item.id === product.id);
                   const quantity = cartItem ? cartItem.quantity : 0;
                   return (
-                    <div key={product.id} className="min-w-[140px] w-[140px] snap-start">
-                      <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between h-full relative">
-                        <div>
-                          <div className="aspect-square bg-gray-50 rounded-xl mb-2 overflow-hidden flex items-center justify-center relative">
-                            {product.image ? (
-                              <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                    <div key={product.id} className="min-w-[130px] w-[130px] snap-start">
+                      <div className="bg-white p-2 rounded-[16px] shadow-sm hover:shadow-md border border-gray-100 flex flex-col justify-between h-full relative transition-all duration-300">
+                        <div className="flex flex-col">
+                          <div className={`w-full aspect-square bg-[#F4F6F8] rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${product.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                            {product.isBestseller && (
+                              <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
+                                Bestseller
+                              </div>
+                            )}
+                            {product.image?.startsWith("http") ||
+                            product.image?.startsWith("data:") ? (
+                              <img
+                                src={product.image}
+                                alt={product.name}
+                                className="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
+                              />
                             ) : (
-                              <span className="text-3xl font-bold text-gray-400">{product.name.charAt(0)}</span>
+                              <div className="w-full h-full flex items-center justify-center">{product.image}</div>
                             )}
                           </div>
-                          <h3 className="font-bold text-gray-900 text-[13px] leading-tight line-clamp-2 min-h-[30px]">{product.name}</h3>
-                          {product.nameHi && <p className="text-[10px] text-gray-500 truncate mt-0.5">{product.nameHi}</p>}
+                          <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
+                            {product.name}
+                          </h3>
+                          
                         </div>
-                        <div className="flex items-center justify-between mt-3">
-                          <p className="font-extrabold text-[#0e783a] text-sm">₹{product.price}</p>
-                          {quantity === 0 ? (
+                        <div className="mt-auto pt-2 flex items-center justify-between gap-1">
+                          <div className="flex flex-col shrink-0">
+                            {(product.mrp || 0) > product.price && (
+                              <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{product.mrp}</span>
+                            )}
+                            <span className="text-gray-900 font-bold text-[13px] leading-none">
+                              ₹{product.price}
+                            </span>
+                          </div>
+                          
+                          {product.isAvailable === false ? (
+                            <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
+                              Out
+                            </div>
+                          ) : quantity === 0 ? (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                updateQuantity(product.id, 1);
-                              }}
-                              className="w-7 h-7 flex items-center justify-center bg-[#0e783a] text-white rounded-lg shadow-sm hover:bg-[#0c6631] active:scale-95 transition-transform"
+                              onClick={() => updateQuantity(product.id, 1)}
+                              className="h-[28px] w-[64px] flex items-center justify-center rounded-lg border border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10 text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0"
                             >
-                              <Plus className="w-4 h-4" />
+                              ADD
                             </button>
                           ) : (
-                            <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
-                              <button onClick={(e) => { e.stopPropagation(); updateQuantity(product.id, -1); }} className="w-6 h-6 flex items-center justify-center text-[#0e783a] bg-white rounded shadow-sm hover:bg-gray-50 active:scale-95"><Minus className="w-3 h-3" /></button>
-                              <span className="w-5 text-center text-xs font-bold text-gray-900">{quantity}</span>
-                              <button onClick={(e) => { e.stopPropagation(); updateQuantity(product.id, 1); }} className="w-6 h-6 flex items-center justify-center text-[#0e783a] bg-white rounded shadow-sm hover:bg-gray-50 active:scale-95"><Plus className="w-3 h-3" /></button>
+                            <div className="flex items-center justify-between bg-[#187D39] text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0">
+                              <button
+                                onClick={() => updateQuantity(product.id, -1)}
+                                className="w-6 h-full flex items-center justify-center active:scale-90"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="text-[13px] font-bold">{quantity}</span>
+                              <button
+                                onClick={() => updateQuantity(product.id, 1)}
+                                className="w-6 h-full flex items-center justify-center active:scale-90"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
                             </div>
                           )}
                         </div>
@@ -1060,85 +1196,202 @@ function MainContent() {
           )}
           {displayedProducts.length > 0 && (
             <div className="grid grid-cols-3 gap-3">
-              {displayedProducts.map((product) => {
-                const qty = getQuantity(product.id);
-                return (
-                  <div
-                    key={product.id}
-                    className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between h-full relative"
-                  >
-                    {isAdmin && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingProduct(product);
-                        }}
-                        className="absolute -top-1 -right-1 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-500 hover:text-[#0e783a]"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </button>
-                    )}
-                    
-                    <div>
-                      <div className={`w-full aspect-square bg-gray-50 rounded-xl mb-2 flex items-center justify-center text-4xl overflow-hidden border border-gray-100 relative ${product.isAvailable === false ? "grayscale opacity-60" : ""}`}>
-                        {product.isBestseller && (
-                          <div className="absolute top-1 left-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 z-10 shadow-sm shadow-red-500/20">
-                            <Flame className="w-2.5 h-2.5" /> Bestseller
+              {displayedProducts.flatMap((product) => {
+                const productElement = ((prod, isRec = false) => {
+                  const qty = getQuantity(prod.id);
+                  return (
+                    <motion.div
+                      layout
+                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
+                      animate={isRec ? { opacity: 1, scale: 1 } : false}
+                      key={isRec ? `rec-${prod.id}` : prod.id}
+                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
+                    >
+                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
+                      {isAdmin && !isRec && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProduct(prod);
+                          }}
+                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      
+                      <div className="flex flex-col">
+                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                          {prod.isBestseller && !isRec && (
+                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
+                              Bestseller
+                            </div>
+                          )}
+                          {prod.image?.startsWith("http") ||
+                          prod.image?.startsWith("data:") ? (
+                            <img
+                              src={prod.image}
+                              alt={prod.name}
+                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
+                          )}
+                        </div>
+                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
+                          {prod.name}
+                        </h3>
+                        
+                      </div>
+                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
+                        <div className="flex flex-col shrink-0">
+                          {(prod.mrp || 0) > prod.price && (
+                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
+                          )}
+                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
+                            ₹{prod.price}
+                          </span>
+                        </div>
+                        
+                        {prod.isAvailable === false ? (
+                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
+                            Out
+                          </div>
+                        ) : qty === 0 ? (
+                          <button
+                            onClick={() => updateQuantity(prod.id, 1)}
+                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
+                          >
+                            ADD
+                          </button>
+                        ) : (
+                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
+                            <button
+                              onClick={() => updateQuantity(prod.id, -1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="text-[13px] font-bold">{qty}</span>
+                            <button
+                              onClick={() => updateQuantity(prod.id, 1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
                           </div>
                         )}
-                        {product.image?.startsWith("http") ||
-                        product.image?.startsWith("data:") ? (
-                          <img
-                            src={product.image}
-                            alt={product.name}
-                            className="w-full h-full object-cover" loading="lazy" decoding="async"
-                          />
+                      </div>
+                    </motion.div>
+                  );
+                })(product, false);
+
+                const isCrossSellTarget = crossSellSource?.id === product.id;
+                if (!isCrossSellTarget) return [productElement];
+
+                const recommendedIds = recommendations[product.id] || [];
+                let recommendedProducts = recommendedIds
+                  .map(id => products.find(p => p.id === id))
+                  .filter(Boolean);
+
+                if (recommendedProducts.length === 0) {
+                  recommendedProducts = products.filter(p => p.isBestseller && p.id !== product.id).slice(0, 2);
+                }
+                if (recommendedProducts.length === 0) {
+                  recommendedProducts = products.filter(p => p.id !== product.id).slice(0, 2);
+                }
+
+                const topRecommendations = recommendedProducts.slice(0, 2);
+                
+                const recElements = topRecommendations.map(recProd => ((prod, isRec = false) => {
+                  const qty = getQuantity(prod.id);
+                  return (
+                    <motion.div
+                      layout
+                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
+                      animate={isRec ? { opacity: 1, scale: 1 } : false}
+                      key={isRec ? `rec-${prod.id}` : prod.id}
+                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
+                    >
+                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
+                      {isAdmin && !isRec && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProduct(prod);
+                          }}
+                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      
+                      <div className="flex flex-col">
+                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                          {prod.isBestseller && !isRec && (
+                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
+                              Bestseller
+                            </div>
+                          )}
+                          {prod.image?.startsWith("http") ||
+                          prod.image?.startsWith("data:") ? (
+                            <img
+                              src={prod.image}
+                              alt={prod.name}
+                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
+                          )}
+                        </div>
+                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
+                          {prod.name}
+                        </h3>
+                        
+                      </div>
+                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
+                        <div className="flex flex-col shrink-0">
+                          {(prod.mrp || 0) > prod.price && (
+                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
+                          )}
+                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
+                            ₹{prod.price}
+                          </span>
+                        </div>
+                        
+                        {prod.isAvailable === false ? (
+                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
+                            Out
+                          </div>
+                        ) : qty === 0 ? (
+                          <button
+                            onClick={() => updateQuantity(prod.id, 1)}
+                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
+                          >
+                            ADD
+                          </button>
                         ) : (
-                          product.image
+                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
+                            <button
+                              onClick={() => updateQuantity(prod.id, -1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="text-[13px] font-bold">{qty}</span>
+                            <button
+                              onClick={() => updateQuantity(prod.id, 1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
                         )}
                       </div>
-                      <h3 className="font-medium text-gray-900 text-xs leading-tight mb-1 line-clamp-2">
-                        {product.name}
-                      </h3>
-                      <p className="text-[10px] text-gray-400">
-                        {product.category}
-                      </p>
-                    </div>
-                    <div className="mt-2">
-                      <p className="text-[#0e783a] font-semibold text-sm mb-2">
-                        ₹{product.price}
-                      </p>
-                      {product.isAvailable === false ? (
-                        <div className="w-full text-center py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400">
-                          Out of Stock
-                        </div>
-                      ) : qty === 0 ? (
-                        <button
-                          onClick={() => updateQuantity(product.id, 1)}
-                          className="w-full border border-[#0e783a] text-[#0e783a] bg-[#0e783a]/5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-[#0e783a]/10 transition-colors"
-                        >
-                          Add
-                        </button>
-                      ) : (
-                        <div className="flex items-center justify-between bg-[#0e783a] text-white rounded-lg px-1 py-1 h-[30px]">
-                          <button
-                            onClick={() => updateQuantity(product.id, -1)}
-                            className="w-6 h-6 flex items-center justify-center active:scale-90"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="text-xs font-bold">{qty}</span>
-                          <button
-                            onClick={() => updateQuantity(product.id, 1)}
-                            className="w-6 h-6 flex items-center justify-center active:scale-90"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
+                    </motion.div>
+                  );
+                })(recProd, true));
+                return [productElement, ...recElements];
               })}
             </div>
           )}
@@ -1150,108 +1403,207 @@ function MainContent() {
                 <h3 className="text-lg font-bold text-gray-800">Frequently Bought Together</h3>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                {connectedProducts.map((product) => {
-                  const qty = getQuantity(product.id);
+                {connectedProducts.flatMap((product) => {
+                  const productElement = ((prod, isRec = false) => {
+                  const qty = getQuantity(prod.id);
                   return (
-                    <div
-                      key={product.id}
-                      className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between h-full relative"
+                    <motion.div
+                      layout
+                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
+                      animate={isRec ? { opacity: 1, scale: 1 } : false}
+                      key={isRec ? `rec-${prod.id}` : prod.id}
+                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
                     >
-                      {isAdmin && (
+                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
+                      {isAdmin && !isRec && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEditingProduct(product);
+                            setEditingProduct(prod);
                           }}
-                          className="absolute -top-1 -right-1 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-500 hover:text-[#0e783a]"
+                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
                         >
                           <Edit2 className="w-3 h-3" />
                         </button>
                       )}
                       
-                      <div>
-                        <div className={`w-full aspect-square bg-gray-50 rounded-xl mb-2 flex items-center justify-center text-4xl overflow-hidden border border-gray-100 relative ${product.isAvailable === false ? "grayscale opacity-60" : ""}`}>
-                          {product.isBestseller && (
-                            <div className="absolute top-1 left-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 z-10 shadow-sm shadow-red-500/20">
-                              <Flame className="w-2.5 h-2.5" /> Bestseller
+                      <div className="flex flex-col">
+                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                          {prod.isBestseller && !isRec && (
+                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
+                              Bestseller
                             </div>
                           )}
-                          {product.image?.startsWith("http") ||
-                          product.image?.startsWith("data:") ? (
+                          {prod.image?.startsWith("http") ||
+                          prod.image?.startsWith("data:") ? (
                             <img
-                              src={product.image}
-                              alt={product.name}
-                              className="w-full h-full object-cover" loading="lazy" decoding="async"
+                              src={prod.image}
+                              alt={prod.name}
+                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
                             />
                           ) : (
-                            product.image
+                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
                           )}
                         </div>
-                        <h3 className="font-medium text-gray-900 text-xs leading-tight mb-1 line-clamp-2">
-                          {product.name}
+                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
+                          {prod.name}
                         </h3>
-                        <p className="text-[10px] text-gray-400">
-                          {product.category}
-                        </p>
+                        
                       </div>
-                      <div className="mt-2">
-                        <p className="text-[#0e783a] font-semibold text-sm mb-2">
-                          ₹{product.price}
-                        </p>
-                        {product.isAvailable === false ? (
-                          <div className="w-full text-center py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-gray-100 text-gray-400">
-                            Out of Stock
+                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
+                        <div className="flex flex-col shrink-0">
+                          {(prod.mrp || 0) > prod.price && (
+                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
+                          )}
+                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
+                            ₹{prod.price}
+                          </span>
+                        </div>
+                        
+                        {prod.isAvailable === false ? (
+                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
+                            Out
                           </div>
                         ) : qty === 0 ? (
                           <button
-                            onClick={() => updateQuantity(product.id, 1)}
-                            className="w-full border border-[#0e783a] text-[#0e783a] bg-[#0e783a]/5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-[#0e783a]/10 transition-colors"
+                            onClick={() => updateQuantity(prod.id, 1)}
+                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
                           >
-                            Add
+                            ADD
                           </button>
                         ) : (
-                          <div className="flex items-center justify-between bg-[#0e783a] text-white rounded-lg px-1 py-1 h-[30px]">
+                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
                             <button
-                              onClick={() => updateQuantity(product.id, -1)}
-                              className="w-6 h-6 flex items-center justify-center active:scale-90"
+                              onClick={() => updateQuantity(prod.id, -1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
                             >
                               <Minus className="w-3 h-3" />
                             </button>
-                            <span className="text-xs font-bold">{qty}</span>
+                            <span className="text-[13px] font-bold">{qty}</span>
                             <button
-                              onClick={() => updateQuantity(product.id, 1)}
-                              className="w-6 h-6 flex items-center justify-center active:scale-90"
+                              onClick={() => updateQuantity(prod.id, 1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
                             >
                               <Plus className="w-3 h-3" />
                             </button>
                           </div>
                         )}
                       </div>
-                    </div>
+                    </motion.div>
                   );
-                })}
-              </div>
+                })(product, false);
+
+                const isCrossSellTarget = crossSellSource?.id === product.id;
+                if (!isCrossSellTarget) return [productElement];
+
+                const recommendedIds = recommendations[product.id] || [];
+                let recommendedProducts = recommendedIds
+                  .map(id => products.find(p => p.id === id))
+                  .filter(Boolean);
+
+                if (recommendedProducts.length === 0) {
+                  recommendedProducts = products.filter(p => p.isBestseller && p.id !== product.id).slice(0, 2);
+                }
+                if (recommendedProducts.length === 0) {
+                  recommendedProducts = products.filter(p => p.id !== product.id).slice(0, 2);
+                }
+
+                const topRecommendations = recommendedProducts.slice(0, 2);
+                
+                const recElements = topRecommendations.map(recProd => ((prod, isRec = false) => {
+                  const qty = getQuantity(prod.id);
+                  return (
+                    <motion.div
+                      layout
+                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
+                      animate={isRec ? { opacity: 1, scale: 1 } : false}
+                      key={isRec ? `rec-${prod.id}` : prod.id}
+                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
+                    >
+                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
+                      {isAdmin && !isRec && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProduct(prod);
+                          }}
+                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      
+                      <div className="flex flex-col">
+                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                          {prod.isBestseller && !isRec && (
+                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
+                              Bestseller
+                            </div>
+                          )}
+                          {prod.image?.startsWith("http") ||
+                          prod.image?.startsWith("data:") ? (
+                            <img
+                              src={prod.image}
+                              alt={prod.name}
+                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
+                          )}
+                        </div>
+                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
+                          {prod.name}
+                        </h3>
+                        
+                      </div>
+                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
+                        <div className="flex flex-col shrink-0">
+                          {(prod.mrp || 0) > prod.price && (
+                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
+                          )}
+                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
+                            ₹{prod.price}
+                          </span>
+                        </div>
+                        
+                        {prod.isAvailable === false ? (
+                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
+                            Out
+                          </div>
+                        ) : qty === 0 ? (
+                          <button
+                            onClick={() => updateQuantity(prod.id, 1)}
+                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
+                          >
+                            ADD
+                          </button>
+                        ) : (
+                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
+                            <button
+                              onClick={() => updateQuantity(prod.id, -1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="text-[13px] font-bold">{qty}</span>
+                            <button
+                              onClick={() => updateQuantity(prod.id, 1)}
+                              className="w-6 h-full flex items-center justify-center active:scale-90"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })(recProd, true));
+                return [productElement, ...recElements];
+                })}</div>
             </div>
           )}
 
-          {isSearching && displayedProducts.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 px-4">
-              <div className="relative w-16 h-16 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full border-[2px] border-dashed border-[#0e783a]/30 animate-[spin_4s_linear_infinite]"></div>
-                <div className="absolute inset-1.5 rounded-full border-[1.5px] border-[#0e783a]/20 border-t-[#0e783a] border-l-[#0e783a] animate-[spin_1.5s_cubic-bezier(0.68,-0.55,0.26,1.55)_infinite]"></div>
-                <div className="absolute inset-3 rounded-full border-[1.5px] border-green-200 border-b-[#0e783a] border-r-[#0e783a] animate-[spin_2.5s_linear_infinite_reverse]"></div>
-                <div className="w-3 h-3 bg-[#0e783a] rounded-full animate-pulse shadow-[0_0_15px_5px_rgba(14,120,58,0.4)]"></div>
-              </div>
-              <div className="mt-4 flex flex-col items-center">
-                <div className="flex gap-1 mb-1.5">
-                  <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></div>
-                  <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
-                  <div className="w-1 h-1 bg-[#0e783a] rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
-                </div>
-                <h3 className="text-[#0e783a] font-bold text-[10px] tracking-[0.2em] uppercase">AI Deep Search</h3>
-              </div>
-            </div>
-          )}
+          {isSearching && displayedProducts.length === 0 && <FunnySearchSkeleton />}
 
           {!isSearching && displayedProducts.length === 0 && (
             <div className="text-center text-gray-500 py-12">
@@ -1292,7 +1644,9 @@ function MainContent() {
             )}
           </div>
         )}
+        {adminModals}
         {globalOverlays}
+        {floatingCartFab}
       </div>
     );
   }
@@ -1301,8 +1655,35 @@ function MainContent() {
     return (
       <div className="min-h-screen bg-gray-50 pb-24">
         {showConfetti && <Confetti width={window.innerWidth} height={window.innerHeight} recycle={false} numberOfPieces={400} gravity={0.2} />}
-        {renderHeader("Order Summary", () => setCurrentView("order"))}
-        <div className="p-4 max-w-md mx-auto space-y-4">
+        {renderHeader(
+          "Order Summary", 
+          () => setCurrentView("order"),
+          cart.length > 0 ? (
+            <button 
+              onClick={() => setCart([])} 
+              className="text-xs font-bold text-red-500 bg-white px-3 py-1.5 rounded-full shadow-sm hover:bg-red-50 active:scale-95 transition-all border border-red-100"
+            >
+              Empty Cart
+            </button>
+          ) : null
+        )}
+                {cart.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-[60vh] px-4 text-center">
+            <div className="w-20 h-20 bg-gray-200 text-gray-400 rounded-full flex items-center justify-center mb-5 shadow-inner">
+              <ShoppingCart className="w-10 h-10" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-1">Your cart is empty</h3>
+            <p className="text-sm text-gray-500 mb-6 max-w-[250px]">Looks like you haven't added any items to your order yet.</p>
+            <button 
+              onClick={() => setCurrentView("order")} 
+              className="bg-[#0e783a] text-white px-8 py-3 rounded-full font-medium active:scale-95 transition-transform flex items-center gap-2 shadow-sm"
+            >
+              Start Shopping <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="p-4 max-w-md mx-auto space-y-4">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 divide-y">
             {cart.map((item) => {
               const product = products.find((p) => p.id === item.id);
@@ -1425,6 +1806,8 @@ function MainContent() {
             </button>
           </div>
         </div>
+        </>)}
+        {adminModals}
         {globalOverlays}
       </div>
     );
@@ -1532,6 +1915,7 @@ function MainContent() {
             </div>
           </div>
         )}
+        {adminModals}
         {globalOverlays}
       </div>
     );
@@ -1579,6 +1963,7 @@ function MainContent() {
             </button>
           </div>
         </div>
+        {adminModals}
         {globalOverlays}
     </div>
     );
@@ -1854,7 +2239,7 @@ function MainContent() {
           <div className="bg-[#f0f9f3] w-full rounded-2xl py-6 px-4 mb-4 border border-[#0e783a]/10 flex flex-col items-center gap-2 shadow-sm relative overflow-hidden">
              <div className="absolute top-0 right-0 w-24 h-24 bg-[#0e783a]/5 rounded-full -translate-y-1/2 translate-x-1/3"></div>
              <div className="absolute bottom-0 left-0 w-20 h-20 bg-[#0e783a]/5 rounded-full translate-y-1/3 -translate-x-1/3"></div>
-             <img src="/logo.png" alt="BCN Store Logo" className="h-14 w-auto mb-2 object-contain drop-shadow-sm" />
+             <img src="/logo.png" alt="BCN Store Logo" className="h-14 w-auto mb-2 object-contain drop-shadow-sm" loading="lazy" />
              <p className="text-[12px] font-bold text-[#0e783a] relative z-10">आपका भरोसा, हमारी पहचान</p>
              <p className="text-[10px] text-gray-500 max-w-[250px] relative z-10 leading-snug mb-2">
                We are committed to delivering the best quality products at your doorstep within 15 minutes.
@@ -1894,6 +2279,7 @@ function MainContent() {
           </button>
         </footer>
       </main>
+      {floatingCartFab}
 
       {showInstallModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -1944,7 +2330,8 @@ function MainContent() {
         </div>
       )}
 
-      {globalOverlays}
+      {adminModals}
+        {globalOverlays}
     </div>
   );
 }
@@ -1977,7 +2364,7 @@ function SplashScreen({ onFinish }: { onFinish: () => void }) {
           transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
           className="bg-white p-5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.3)]"
         >
-          <img src="/logo.png" alt="BCN Store Logo" className="h-24 w-auto object-contain" />
+          <img src="/logo.png" alt="BCN Store Logo" className="h-24 w-auto object-contain" fetchPriority="high" loading="eager" />
         </motion.div>
         
         <div className="flex flex-col items-center">

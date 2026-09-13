@@ -28,11 +28,11 @@ export async function processImageToBase64(file: File | Blob): Promise<string> {
 
   // 2. Load into an HTML Image Element to draw on Canvas
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        // 3. Calculate new dimensions (Max 800x800)
+    const objectUrl = URL.createObjectURL(fileToProcess);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      // 3. Calculate new dimensions (Max 800x800)
         const MAX_SIZE = 800;
         let width = img.width;
         let height = img.height;
@@ -73,17 +73,10 @@ export async function processImageToBase64(file: File | Blob): Promise<string> {
       };
       
       img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
         reject(new Error("Failed to load image for processing"));
       };
 
-      if (e.target?.result) {
-        img.src = e.target.result as string;
-      } else {
-        reject(new Error("Failed to read file data"));
-      }
-    };
-    
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(fileToProcess);
+      img.src = objectUrl;
   });
 }

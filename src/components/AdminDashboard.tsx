@@ -5,6 +5,7 @@ import { InventoryManagement } from './admin/InventoryManagement';
 import { CategoryManagement } from './admin/CategoryManagement';
 import { SeatManagement } from './admin/SeatManagement';
 import { DataBackup } from './admin/DataBackup';
+import { ImageFixer } from './admin/ImageFixer';
 
 interface Props {
   role: string;
@@ -80,6 +81,8 @@ export function AdminDashboard({ role, onLogout, onBack }: Props) {
             <DataBackup />
           </div>
         )}
+
+        {isAdmin && <ImageFixer />}
 
         {/* Module: User Roles & Access (Superadmin ONLY) */}
         {isSuperAdmin && (
