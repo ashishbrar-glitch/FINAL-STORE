@@ -965,7 +965,7 @@ function MainContent() {
           href={`https://wa.me/${PHONE_NUMBER}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="fixed bottom-6 right-4 z-50 bg-[#25D366] text-white p-3.5 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-transform flex items-center justify-center"
+          className={`fixed right-4 z-50 bg-[#25D366] text-white p-3.5 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all duration-300 flex items-center justify-center ${cart.length > 0 && currentView !== 'cart' && currentView !== 'order' ? 'bottom-20' : 'bottom-6'}`}
           title="Chat on WhatsApp"
         >
           <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -997,13 +997,21 @@ function MainContent() {
   );
 
   
-  const floatingCartFab = cart.length > 0 && (
-    <div className="fixed bottom-0 left-0 right-0 z-40 px-3 py-3 pointer-events-none">
-      <div className="max-w-md mx-auto relative pointer-events-auto">
-        <button
-          onClick={() => setCurrentView("cart")}
-          className="w-full bg-[#0c831f] text-white rounded-[16px] px-4 py-3 flex items-center justify-between shadow-[0_8px_20px_rgba(12,131,31,0.25)] active:scale-[0.98] transition-transform overflow-hidden relative"
+  const floatingCartFab = (
+    <AnimatePresence>
+      {cart.length > 0 && (
+        <motion.div
+          initial={{ y: 100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 100, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 300, damping: 25 }}
+          className="fixed bottom-0 left-0 right-0 z-40 px-3 py-3 pointer-events-none"
         >
+          <div className="max-w-md mx-auto relative pointer-events-auto">
+            <button
+              onClick={() => setCurrentView("cart")}
+              className="w-full bg-[#0c831f] text-white rounded-[16px] px-4 py-3 flex items-center justify-between shadow-[0_8px_20px_rgba(12,131,31,0.25)] active:scale-[0.98] transition-transform overflow-hidden relative"
+            >
           {/* Shimmer effect */}
           <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 -translate-x-[100%] animate-[shimmer_2s_infinite]"></div>
           
@@ -1035,7 +1043,9 @@ function MainContent() {
           </div>
         </button>
       </div>
-    </div>
+    </motion.div>
+    )}
+    </AnimatePresence>
   );
 
   if (currentView === "order") {
@@ -1196,23 +1206,17 @@ function MainContent() {
           )}
           {displayedProducts.length > 0 && (
             <div className="grid grid-cols-3 gap-3">
-              {displayedProducts.flatMap((product) => {
-                const productElement = ((prod, isRec = false) => {
-                  const qty = getQuantity(prod.id);
-                  return (
+              {displayedProducts.map((product) => (
                     <motion.div
                       layout
-                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
-                      animate={isRec ? { opacity: 1, scale: 1 } : false}
-                      key={isRec ? `rec-${prod.id}` : prod.id}
-                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
+                      key={product.id}
+                      className="group bg-white border-gray-100 p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300"
                     >
-                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
-                      {isAdmin && !isRec && (
+                      {isAdmin && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEditingProduct(prod);
+                            setEditingProduct(product);
                           }}
                           className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
                         >
@@ -1221,60 +1225,59 @@ function MainContent() {
                       )}
                       
                       <div className="flex flex-col">
-                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
-                          {prod.isBestseller && !isRec && (
+                        <div className={`w-full aspect-square bg-[#F4F6F8] rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${product.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                          {product.isBestseller && (
                             <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
                               Bestseller
                             </div>
                           )}
-                          {prod.image?.startsWith("http") ||
-                          prod.image?.startsWith("data:") ? (
+                          {product.image?.startsWith("http") ||
+                          product.image?.startsWith("data:") ? (
                             <img
-                              src={prod.image}
-                              alt={prod.name}
+                              src={product.image}
+                              alt={product.name}
                               className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
                             />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
+                            <div className="w-full h-full flex items-center justify-center">{product.image}</div>
                           )}
                         </div>
                         <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
-                          {prod.name}
+                          {product.name}
                         </h3>
-                        
                       </div>
                       <div className="mt-auto pt-2 flex items-center justify-between gap-1">
                         <div className="flex flex-col shrink-0">
-                          {(prod.mrp || 0) > prod.price && (
-                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
+                          {(product.mrp || 0) > product.price && (
+                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{product.mrp}</span>
                           )}
-                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
-                            ₹{prod.price}
+                          <span className="text-gray-900 font-bold text-[13px] leading-none">
+                            ₹{product.price}
                           </span>
                         </div>
                         
-                        {prod.isAvailable === false ? (
+                        {product.isAvailable === false ? (
                           <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
                             Out
                           </div>
-                        ) : qty === 0 ? (
+                        ) : getQuantity(product.id) === 0 ? (
                           <button
-                            onClick={() => updateQuantity(prod.id, 1)}
-                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
+                            onClick={() => updateQuantity(product.id, 1)}
+                            className="h-[28px] w-[64px] flex items-center justify-center rounded-lg border border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10 text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0"
                           >
                             ADD
                           </button>
                         ) : (
-                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
+                          <div className="flex items-center justify-between bg-[#187D39] text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0">
                             <button
-                              onClick={() => updateQuantity(prod.id, -1)}
+                              onClick={() => updateQuantity(product.id, -1)}
                               className="w-6 h-full flex items-center justify-center active:scale-90"
                             >
                               <Minus className="w-3 h-3" />
                             </button>
-                            <span className="text-[13px] font-bold">{qty}</span>
+                            <span className="text-[13px] font-bold">{getQuantity(product.id)}</span>
                             <button
-                              onClick={() => updateQuantity(prod.id, 1)}
+                              onClick={() => updateQuantity(product.id, 1)}
                               className="w-6 h-full flex items-center justify-center active:scale-90"
                             >
                               <Plus className="w-3 h-3" />
@@ -1283,116 +1286,7 @@ function MainContent() {
                         )}
                       </div>
                     </motion.div>
-                  );
-                })(product, false);
-
-                const isCrossSellTarget = crossSellSource?.id === product.id;
-                if (!isCrossSellTarget) return [productElement];
-
-                const recommendedIds = recommendations[product.id] || [];
-                let recommendedProducts = recommendedIds
-                  .map(id => products.find(p => p.id === id))
-                  .filter(Boolean);
-
-                if (recommendedProducts.length === 0) {
-                  recommendedProducts = products.filter(p => p.isBestseller && p.id !== product.id).slice(0, 2);
-                }
-                if (recommendedProducts.length === 0) {
-                  recommendedProducts = products.filter(p => p.id !== product.id).slice(0, 2);
-                }
-
-                const topRecommendations = recommendedProducts.slice(0, 2);
-                
-                const recElements = topRecommendations.map(recProd => ((prod, isRec = false) => {
-                  const qty = getQuantity(prod.id);
-                  return (
-                    <motion.div
-                      layout
-                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
-                      animate={isRec ? { opacity: 1, scale: 1 } : false}
-                      key={isRec ? `rec-${prod.id}` : prod.id}
-                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
-                    >
-                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
-                      {isAdmin && !isRec && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingProduct(prod);
-                          }}
-                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                      )}
-                      
-                      <div className="flex flex-col">
-                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
-                          {prod.isBestseller && !isRec && (
-                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
-                              Bestseller
-                            </div>
-                          )}
-                          {prod.image?.startsWith("http") ||
-                          prod.image?.startsWith("data:") ? (
-                            <img
-                              src={prod.image}
-                              alt={prod.name}
-                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
-                          )}
-                        </div>
-                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
-                          {prod.name}
-                        </h3>
-                        
-                      </div>
-                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
-                        <div className="flex flex-col shrink-0">
-                          {(prod.mrp || 0) > prod.price && (
-                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
-                          )}
-                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
-                            ₹{prod.price}
-                          </span>
-                        </div>
-                        
-                        {prod.isAvailable === false ? (
-                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
-                            Out
-                          </div>
-                        ) : qty === 0 ? (
-                          <button
-                            onClick={() => updateQuantity(prod.id, 1)}
-                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
-                          >
-                            ADD
-                          </button>
-                        ) : (
-                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
-                            <button
-                              onClick={() => updateQuantity(prod.id, -1)}
-                              className="w-6 h-full flex items-center justify-center active:scale-90"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="text-[13px] font-bold">{qty}</span>
-                            <button
-                              onClick={() => updateQuantity(prod.id, 1)}
-                              className="w-6 h-full flex items-center justify-center active:scale-90"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })(recProd, true));
-                return [productElement, ...recElements];
-              })}
+              ))}
             </div>
           )}
 
@@ -1403,23 +1297,17 @@ function MainContent() {
                 <h3 className="text-lg font-bold text-gray-800">Frequently Bought Together</h3>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                {connectedProducts.flatMap((product) => {
-                  const productElement = ((prod, isRec = false) => {
-                  const qty = getQuantity(prod.id);
-                  return (
+                {connectedProducts.map((product) => (
                     <motion.div
                       layout
-                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
-                      animate={isRec ? { opacity: 1, scale: 1 } : false}
-                      key={isRec ? `rec-${prod.id}` : prod.id}
-                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
+                      key={product.id}
+                      className="group bg-white border-gray-100 p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300"
                     >
-                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
-                      {isAdmin && !isRec && (
+                      {isAdmin && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEditingProduct(prod);
+                            setEditingProduct(product);
                           }}
                           className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
                         >
@@ -1428,60 +1316,59 @@ function MainContent() {
                       )}
                       
                       <div className="flex flex-col">
-                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
-                          {prod.isBestseller && !isRec && (
+                        <div className={`w-full aspect-square bg-[#F4F6F8] rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${product.isAvailable === false ? "grayscale opacity-50" : ""}`}>
+                          {product.isBestseller && (
                             <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
                               Bestseller
                             </div>
                           )}
-                          {prod.image?.startsWith("http") ||
-                          prod.image?.startsWith("data:") ? (
+                          {product.image?.startsWith("http") ||
+                          product.image?.startsWith("data:") ? (
                             <img
-                              src={prod.image}
-                              alt={prod.name}
+                              src={product.image}
+                              alt={product.name}
                               className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
                             />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
+                            <div className="w-full h-full flex items-center justify-center">{product.image}</div>
                           )}
                         </div>
                         <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
-                          {prod.name}
+                          {product.name}
                         </h3>
-                        
                       </div>
                       <div className="mt-auto pt-2 flex items-center justify-between gap-1">
                         <div className="flex flex-col shrink-0">
-                          {(prod.mrp || 0) > prod.price && (
-                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
+                          {(product.mrp || 0) > product.price && (
+                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{product.mrp}</span>
                           )}
-                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
-                            ₹{prod.price}
+                          <span className="text-gray-900 font-bold text-[13px] leading-none">
+                            ₹{product.price}
                           </span>
                         </div>
                         
-                        {prod.isAvailable === false ? (
+                        {product.isAvailable === false ? (
                           <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
                             Out
                           </div>
-                        ) : qty === 0 ? (
+                        ) : getQuantity(product.id) === 0 ? (
                           <button
-                            onClick={() => updateQuantity(prod.id, 1)}
-                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
+                            onClick={() => updateQuantity(product.id, 1)}
+                            className="h-[28px] w-[64px] flex items-center justify-center rounded-lg border border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10 text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0"
                           >
                             ADD
                           </button>
                         ) : (
-                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
+                          <div className="flex items-center justify-between bg-[#187D39] text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0">
                             <button
-                              onClick={() => updateQuantity(prod.id, -1)}
+                              onClick={() => updateQuantity(product.id, -1)}
                               className="w-6 h-full flex items-center justify-center active:scale-90"
                             >
                               <Minus className="w-3 h-3" />
                             </button>
-                            <span className="text-[13px] font-bold">{qty}</span>
+                            <span className="text-[13px] font-bold">{getQuantity(product.id)}</span>
                             <button
-                              onClick={() => updateQuantity(prod.id, 1)}
+                              onClick={() => updateQuantity(product.id, 1)}
                               className="w-6 h-full flex items-center justify-center active:scale-90"
                             >
                               <Plus className="w-3 h-3" />
@@ -1490,116 +1377,7 @@ function MainContent() {
                         )}
                       </div>
                     </motion.div>
-                  );
-                })(product, false);
-
-                const isCrossSellTarget = crossSellSource?.id === product.id;
-                if (!isCrossSellTarget) return [productElement];
-
-                const recommendedIds = recommendations[product.id] || [];
-                let recommendedProducts = recommendedIds
-                  .map(id => products.find(p => p.id === id))
-                  .filter(Boolean);
-
-                if (recommendedProducts.length === 0) {
-                  recommendedProducts = products.filter(p => p.isBestseller && p.id !== product.id).slice(0, 2);
-                }
-                if (recommendedProducts.length === 0) {
-                  recommendedProducts = products.filter(p => p.id !== product.id).slice(0, 2);
-                }
-
-                const topRecommendations = recommendedProducts.slice(0, 2);
-                
-                const recElements = topRecommendations.map(recProd => ((prod, isRec = false) => {
-                  const qty = getQuantity(prod.id);
-                  return (
-                    <motion.div
-                      layout
-                      initial={isRec ? { opacity: 0, scale: 0.8 } : false}
-                      animate={isRec ? { opacity: 1, scale: 1 } : false}
-                      key={isRec ? `rec-${prod.id}` : prod.id}
-                      className={`group ${isRec ? "bg-purple-50 border-purple-200 ring-1 ring-purple-100" : "bg-white border-gray-100"} p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300`}
-                    >
-                      {isRec && <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-purple-600 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full z-20 shadow-sm whitespace-nowrap">Pairs nicely!</div>}
-                      {isAdmin && !isRec && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingProduct(prod);
-                          }}
-                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                      )}
-                      
-                      <div className="flex flex-col">
-                        <div className={`w-full aspect-square ${isRec ? 'bg-white' : 'bg-[#F4F6F8]'} rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${prod.isAvailable === false ? "grayscale opacity-50" : ""}`}>
-                          {prod.isBestseller && !isRec && (
-                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
-                              Bestseller
-                            </div>
-                          )}
-                          {prod.image?.startsWith("http") ||
-                          prod.image?.startsWith("data:") ? (
-                            <img
-                              src={prod.image}
-                              alt={prod.name}
-                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">{prod.image}</div>
-                          )}
-                        </div>
-                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
-                          {prod.name}
-                        </h3>
-                        
-                      </div>
-                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
-                        <div className="flex flex-col shrink-0">
-                          {(prod.mrp || 0) > prod.price && (
-                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{prod.mrp}</span>
-                          )}
-                          <span className={`${isRec ? 'text-purple-700' : 'text-gray-900'} font-bold text-[13px] leading-none`}>
-                            ₹{prod.price}
-                          </span>
-                        </div>
-                        
-                        {prod.isAvailable === false ? (
-                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
-                            Out
-                          </div>
-                        ) : qty === 0 ? (
-                          <button
-                            onClick={() => updateQuantity(prod.id, 1)}
-                            className={`h-[28px] w-[64px] flex items-center justify-center rounded-lg border ${isRec ? 'border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100' : 'border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10'} text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0`}
-                          >
-                            ADD
-                          </button>
-                        ) : (
-                          <div className={`flex items-center justify-between ${isRec ? 'bg-purple-600' : 'bg-[#187D39]'} text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0`}>
-                            <button
-                              onClick={() => updateQuantity(prod.id, -1)}
-                              className="w-6 h-full flex items-center justify-center active:scale-90"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="text-[13px] font-bold">{qty}</span>
-                            <button
-                              onClick={() => updateQuantity(prod.id, 1)}
-                              className="w-6 h-full flex items-center justify-center active:scale-90"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })(recProd, true));
-                return [productElement, ...recElements];
-                })}</div>
+              ))}</div>
             </div>
           )}
 
@@ -1646,6 +1424,15 @@ function MainContent() {
         )}
         {adminModals}
         {globalOverlays}
+        {crossSellSource && currentView !== "cart" && currentView !== "order" && (
+          <CrossSellToast
+            sourceProduct={crossSellSource}
+            recommendations={recommendations}
+            products={products}
+            onClose={() => setCrossSellSource(null)}
+            onAddToCart={updateQuantity}
+          />
+        )}
         {floatingCartFab}
       </div>
     );
