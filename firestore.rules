@@ -1,7 +1,7 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
+
     // --------------------------------------------------------------------------
     // GLOBAL HELPERS
     // --------------------------------------------------------------------------
@@ -22,15 +22,15 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return true; // Demo mode: bypass auth
+      return isSignedIn() && getUserRole() == 'superadmin';
     }
 
     function isAdmin() {
-      return true; // Demo mode: bypass auth
+      return isSignedIn() && (getUserRole() == 'superadmin' || getUserRole() == 'admin');
     }
 
     function isManager() {
-      return true; // Demo mode: bypass auth
+      return isSignedIn() && (getUserRole() == 'superadmin' || getUserRole() == 'admin' || getUserRole() == 'manager');
     }
     
     function isValidId(id) {
@@ -68,6 +68,29 @@ service cloud.firestore {
           && data.isOccupied is bool;
     }
 
+    function isClientProductUpdate(isCreate) {
+      let aiFields = ['aiSearchAliases', 'searchStatus', 'searchError', 'searchErrorAt', 'processingAttempts', 'processingStartedAt', 'processingJobId', 'lastProcessedAt', 'serverSignature'];
+      return isCreate
+          ? (!incoming().keys().hasAny(aiFields) && incoming().productVersion == 1)
+          : (!incoming().diff(existing()).affectedKeys().hasAny(aiFields) && incoming().productVersion == (existing().get('productVersion', 0) + 1));
+    }
+    
+    function isValidRelationship(data) {
+      return data.keys().hasAll(['participants', 'type', 'confidence', 'source', 'status', 'updatedAt', 'createdAt'])
+          && data.participants is list
+          && data.participants.size() == 2
+          && data.participants[0] is string
+          && data.participants[1] is string
+          && data.participants[0] < data.participants[1]
+          && (data.type == 'similar' || data.type == 'complementary')
+          && data.confidence is number
+          && data.confidence >= 0.0 && data.confidence <= 1.0
+          && (data.source == 'manual' || data.source == 'ai')
+          && (data.status == 'pending' || data.status == 'approved' || data.status == 'blocked')
+          && data.createdAt is number
+          && data.updatedAt is number;
+    }
+
     // --------------------------------------------------------------------------
     // CATCH ALL (DEFAULT DENY)
     // --------------------------------------------------------------------------
@@ -80,38 +103,55 @@ service cloud.firestore {
     // --------------------------------------------------------------------------
     
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if isSignedIn() && (request.auth.uid == userId || isManager());
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId && incoming().role == existing().role && incoming().email == existing().email);
     }
     
     match /categories/{categoryId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
-      allow update: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
+      allow create: if isManager() && isValidId(categoryId) && isValidCategory(incoming());
+      allow update: if isManager() && isValidId(categoryId) && isValidCategory(incoming());
       allow delete: if isSuperAdmin() && isValidId(categoryId);
     }
     
     match /products/{productId} {
       allow read: if true;
-      allow create: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
-      allow update: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
+      allow create: if isManager() && isValidId(productId) && isValidProduct(incoming()) && isClientProductUpdate(true);
+      allow update: if isManager() && isValidId(productId) && isValidProduct(incoming()) && isClientProductUpdate(false);
       allow delete: if isSuperAdmin() && isValidId(productId);
     }
 
-    match /seats/{seatId} {
+    match /productRecommendations/{id} {
+      // Customers can only read approved recommendations
+      allow read: if resource.data.status == 'approved' || isManager();
+      
+      // Only admins/managers can create/update manually.
+      // AI creations happen via the secure backend using Admin SDK.
+      allow create, update: if isManager() 
+          && request.resource.data.source == 'manual';
+          
+      allow delete: if isManager();
+    }
+    
+    match /productRelationships/{relId} {
+      allow read, write: if false; // Deprecated, backend only migration
+    }
+
+
+    match /searchMappings/{mappingId} {
       allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+    match /seats/{seatId} {
+      allow read: if isManager();
       allow create: if isManager() && isValidId(seatId) && isValidSeat(incoming());
       allow update: if isManager() && isValidId(seatId) && isValidSeat(incoming());
       allow delete: if isSuperAdmin() && isValidId(seatId);
     }
-    
-    match /searchMappings/{mappingId} {
+    match /seatAvailability/{seatId} {
       allow read: if true;
-      allow write: if true; // Demo mode: anyone can write mappings
-    }
-    
-    match /system/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow write: if isManager();
     }
   }
 }

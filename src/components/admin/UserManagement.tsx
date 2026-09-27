@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../lib/firebase';
+import { db, auth } from '../../lib/firebase';
 import { collection, getDocs, getDocsFromCache, doc, setDoc, deleteDoc, query } from 'firebase/firestore';
 import { ShieldAlert, Trash2, Key, Loader2, UserPlus, X } from 'lucide-react';
 
@@ -29,7 +29,7 @@ export function UserManagement() {
       const snapshot = await getDocs(q);
       processUsers(snapshot);
     } catch (err: any) {
-      if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Fetch users error:', err);
+      if (err?.code === 'permission-denied') { setError('Insufficient permissions or session expired. Please re-login.'); } else if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Fetch users error:', err);
       if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
         try {
           const snapshot = await getDocsFromCache(query(collection(db, 'users')));
@@ -47,15 +47,23 @@ export function UserManagement() {
     setError('');
     
     try {
-      // Create user directly in Firestore bypassing Firebase Auth
-      const newUserId = `user_${Date.now()}`;
-      await setDoc(doc(db, 'users', newUserId), {
-        uid: newUserId,
-        email,
-        password, // Insecure - only for demo mode
-        role,
-        createdAt: new Date()
+      const user = auth.currentUser;
+      if (!user) throw new Error("Not authenticated");
+      const token = await user.getIdToken();
+      
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ email, password, role })
       });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create user");
+      }
       
       alert("User created successfully!");
       setEmail('');
@@ -64,8 +72,10 @@ export function UserManagement() {
       setShowAddForm(false);
       fetchUsers();
     } catch (err: any) {
-      if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error(err);
-      setError(err.message);
+      if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota') || err?.message === 'Failed to fetch' || err?.message?.includes("Unexpected token '<'"))) {
+        console.error(err);
+        setError(err.message);
+      }
     } finally {
       setActionLoading(false);
     }
@@ -75,10 +85,27 @@ export function UserManagement() {
     if (!window.confirm("Are you sure?")) return;
     
     try {
-      await deleteDoc(doc(db, 'users', uid));
+      const user = auth.currentUser;
+      if (!user) throw new Error("Not authenticated");
+      const token = await user.getIdToken();
+      
+      const res = await fetch(`/api/admin/users/${uid}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to delete user");
+      }
+      
       fetchUsers();
     } catch (err: any) {
-      alert("Error deleting user: " + err.message);
+      if (!err?.message?.includes("Unexpected token '<'") && err.message !== "Failed to fetch") {
+        alert("Error deleting user: " + err.message);
+      }
     }
   };
 
@@ -86,6 +113,7 @@ export function UserManagement() {
 
   return (
     <div className="space-y-4">
+      {error && !showAddForm && <div className="p-3 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100">{error}</div>}
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-gray-900 text-lg">System Users</h3>
         <button 
@@ -148,7 +176,7 @@ export function UserManagement() {
                 >
                   {user.role}
                 </span>
-                <span className="text-[10px] text-gray-400 font-mono">Pass: {user.password}</span>
+                
               </div>
             </div>
             <div className="flex gap-2">

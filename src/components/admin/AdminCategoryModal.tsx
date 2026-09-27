@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, Check, Loader2, Sparkles, Image as ImageIcon, SlidersHorizontal, Wand2, RefreshCcw, AlertCircle } from 'lucide-react';
-import { db } from '../../lib/firebase';
+import { db, auth } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { processImageToBase64 } from '../../lib/imageProcessor';
 import { pipeline, env } from '@huggingface/transformers';
@@ -33,17 +33,23 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
     if (!nameEn) return;
     setIsTranslating(true);
     try {
+      const token = await auth.currentUser?.getIdToken();
       const res = await fetch("/api/translate-admin", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        },
         body: JSON.stringify({ text: nameEn, type: "category" })
       });
       if (!res.ok) throw new Error("Translation failed");
       const data = await res.json();
       if (data.nameHi) setNameHi(data.nameHi.toUpperCase());
       if (data.emoji && !emoji) setEmoji(data.emoji);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      if (e.message !== "Failed to fetch" && !e.message?.includes("Unexpected token \'<\'")) {
+        console.error(e);
+      }
       alert("Failed to auto-translate. Please enter manually.");
     } finally {
       setIsTranslating(false);
@@ -198,7 +204,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
       setImageState('generated');
       
     } catch (err: any) {
-      console.error(err);
+      if (!err?.message?.includes("Unexpected token '<'")) console.error(err);
       setImageState('failed');
       setCleanStatus("Failed to process image.");
     }
@@ -393,7 +399,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                     >
                       {originalPreview ? (
                         originalPreview.startsWith("http") || originalPreview.startsWith("data:") ? (
-                          <img src={originalPreview} alt="Preview" className="w-full h-full object-contain" />
+                          <img src={originalPreview || undefined} alt="Preview" className="w-full h-full object-contain" />
                         ) : (
                           <div className="text-5xl">{originalPreview}</div>
                         )
@@ -416,7 +422,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                        {/* Original */}
                        <div className="flex-1 space-y-2">
                          <div className="aspect-square bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-center p-2">
-                           <img src={originalPreview!} alt="Original" className="w-full h-full object-contain rounded-lg" />
+                           <img src={originalPreview || undefined} alt="Original" className="w-full h-full object-contain rounded-lg" />
                          </div>
                          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider text-center">Original</p>
                        </div>
@@ -438,7 +444,7 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
                             )}
                             {(imageState === 'generated' || imageState === 'processing') && generatedPreview && (
                                <img 
-                                 src={generatedPreview} 
+                                 src={generatedPreview || undefined} 
                                  alt="Generated" 
                                  className="w-full h-full object-contain drop-shadow-md rounded-lg" 
                                  style={{ filter: `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)` }}

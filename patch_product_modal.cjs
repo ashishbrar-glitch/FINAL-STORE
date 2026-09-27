@@ -2,16 +2,10 @@ const fs = require('fs');
 const file = 'src/components/admin/AdminProductModal.tsx';
 let content = fs.readFileSync(file, 'utf8');
 
-// Remove isGeneratingImage state
-content = content.replace(/const \[isGeneratingImage, setIsGeneratingImage\] = useState\(false\);\n/, '');
-
-// Remove handleGenerateImage
-const handleGenRegex = /const handleGenerateImage = async \(\) => \{[\s\S]*?finally \{\s*setIsGeneratingImage\(false\);\s*\}\s*\};\n/g;
-content = content.replace(handleGenRegex, '');
-
-// Remove the button
-const buttonRegex = /<button\s+type="button"\s+onClick=\{handleGenerateImage\}[\s\S]*?<\/button>\s*/g;
-content = content.replace(buttonRegex, '');
+content = content.replace(/catch \(e\) \{\n           console\.error\("AI Error:", e\);\n        \}/g, `catch (e: any) {
+           if (e.message !== "Failed to fetch") {
+              console.error("AI Error:", e);
+           }
+        }`);
 
 fs.writeFileSync(file, content);
-console.log("Patched AdminProductModal.tsx");

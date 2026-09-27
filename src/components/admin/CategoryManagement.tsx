@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { db } from "../../lib/firebase";
+import { db, auth } from "../../lib/firebase";
 import {
   collection,
   getDocs,
@@ -43,18 +43,24 @@ export function CategoryManagement() {
     if (!nameEn) return;
     setIsTranslating(true);
     try {
+      const token = await auth.currentUser?.getIdToken();
       const res = await fetch("/api/translate-admin", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token
+        },
         body: JSON.stringify({ text: nameEn, type: "category" })
       });
       if (!res.ok) throw new Error("Translation failed");
       const data = await res.json();
       if (data.nameHi) setNameHi(data.nameHi.toUpperCase());
       if (data.emoji && !emoji) setEmoji(data.emoji);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to auto-translate. Please enter manually.");
+    } catch (e: any) {
+      if (e.message !== "Failed to fetch" && !e.message?.includes("Unexpected token '<'")) {
+        console.error(e);
+        alert("Failed to auto-translate. Please enter manually.");
+      }
     } finally {
       setIsTranslating(false);
     }
@@ -217,7 +223,7 @@ export function CategoryManagement() {
           >
             {imagePreview ? (
               imagePreview.startsWith("http") || imagePreview.startsWith("data:") ? (
-                <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                <img src={imagePreview || undefined} alt="Preview" className="w-full h-full object-cover" />
               ) : (
                 <div className="text-4xl">{imagePreview}</div>
               )
@@ -313,7 +319,7 @@ export function CategoryManagement() {
           >
             <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 overflow-hidden text-2xl border border-gray-100">
               {cat.imageUrl ? (
-                <img src={cat.imageUrl} className="w-full h-full object-cover" alt="" />
+                <img src={cat.imageUrl || undefined} className="w-full h-full object-cover" alt="" />
               ) : (
                 cat.emoji
               )}

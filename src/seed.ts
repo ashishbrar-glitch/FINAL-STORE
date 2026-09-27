@@ -27,11 +27,11 @@ async function seed() {
     await setDoc(doc(db, 'users', adminId), {
       uid: adminId,
       email: 'admin@bcnstore.com',
-      password: 'password123',
+      
       role: 'superadmin',
       createdAt: new Date()
     });
-    console.log("Superadmin created: admin@bcnstore.com / password123");
+    console.log("Superadmin created: admin@bcnstore.com");
   } catch (e: any) {
     console.error("Error creating superadmin:", e);
   }

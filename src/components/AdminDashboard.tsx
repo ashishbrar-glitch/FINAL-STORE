@@ -1,11 +1,15 @@
 import React from 'react';
-import { FolderTree, LogOut, ArrowLeft, Users, ShieldAlert, BookOpen, Package, Database } from 'lucide-react';
+import { FolderTree, LogOut, ArrowLeft, Users, ShieldAlert, BookOpen, Package, Database, Network } from 'lucide-react';
 import { UserManagement } from './admin/UserManagement';
 import { InventoryManagement } from './admin/InventoryManagement';
 import { CategoryManagement } from './admin/CategoryManagement';
 import { SeatManagement } from './admin/SeatManagement';
 import { DataBackup } from './admin/DataBackup';
 import { ImageFixer } from './admin/ImageFixer';
+
+import { RelationshipManagement } from './admin/RelationshipManagement';
+import { auth } from '../lib/firebase';
+import { signOut } from 'firebase/auth';
 
 interface Props {
   role: string;
@@ -15,7 +19,7 @@ interface Props {
 
 export function AdminDashboard({ role, onLogout, onBack }: Props) {
   const handleSignOut = () => {
-    localStorage.removeItem('adminSessionRole');
+    signOut(auth).catch(e => console.error(e));
     onLogout();
   };
 
@@ -83,6 +87,20 @@ export function AdminDashboard({ role, onLogout, onBack }: Props) {
         )}
 
         {isAdmin && <ImageFixer />}
+        
+
+        {isAdmin && (
+          <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm mt-4">
+            <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center mb-3">
+              <Network className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-1">Product Relationships</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Review and approve AI-generated product recommendations.
+            </p>
+            <RelationshipManagement />
+          </div>
+        )}
 
         {/* Module: User Roles & Access (Superadmin ONLY) */}
         {isSuperAdmin && (

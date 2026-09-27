@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, getDocsFromCache } from 'firebase/firestore';
-import { Lock, Mail, ArrowLeft, Loader2, AlertTriangle } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { Lock, Mail, ArrowLeft, Loader2 } from 'lucide-react';
 
 interface Props {
   onBack: () => void;
@@ -18,45 +20,25 @@ export function AdminLogin({ onBack, onLoginSuccess }: Props) {
     e.preventDefault();
     setLoading(true);
     setError('');
-
-    const processLogin = (snapshot: any) => {
-      if (snapshot.empty) {
-        setError('Invalid email or password.');
-        setLoading(false);
-        return;
-      }
-
-      let loggedIn = false;
-      snapshot.forEach((doc: any) => {
-        const data = doc.data();
-        if (data.password === password) { 
-           loggedIn = true;
-           localStorage.setItem('adminSessionRole', data.role);
-           onLoginSuccess(data.role);
-        }
-      });
-
-      if (!loggedIn) {
-        setError('Invalid email or password.');
-      }
-    };
-
+    
     try {
-      const q = query(collection(db, 'users'), where('email', '==', email));
-      const snapshot = await getDocs(q);
-      processLogin(snapshot);
-    } catch (err: any) {
-      if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error(err);
-      if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-         try {
-            const q = query(collection(db, 'users'), where('email', '==', email));
-            const snapshot = await getDocsFromCache(q);
-            processLogin(snapshot);
-         } catch(e) {
-            setError('System is offline/quota exceeded. Cannot verify credentials.');
-         }
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid;
+      
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        onLoginSuccess(data.role);
       } else {
-        setError('An error occurred during login.');
+        throw new Error('Unauthorized: No admin role assigned to this user.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (err.message) {
+         setError(err.message);
+      } else {
+         setError('Invalid email or password.');
       }
     } finally {
       setLoading(false);

@@ -322,7 +322,7 @@ export function InventoryManagement() {
               {product.imageUrl?.startsWith("http") ||
               product.imageUrl?.startsWith("data:") ? (
                 <img
-                  src={product.imageUrl}
+                  src={product.imageUrl || undefined}
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />

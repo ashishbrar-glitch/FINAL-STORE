@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, getDocs, getDocsFromCache, doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, getDocsFromCache, doc, setDoc, serverTimestamp, onSnapshot, writeBatch } from 'firebase/firestore';
 import { User, Loader2, UserMinus } from 'lucide-react';
 
 // Reusing same seat generation logic
@@ -60,15 +60,20 @@ export function SeatManagement() {
         
     try {
       const isOccupied = allocateeName.trim().length > 0;
-      await setDoc(doc(db, 'seats', selectedSeatId), {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'seats', selectedSeatId), {
         seatId: selectedSeatId,
         isOccupied,
         allocatedTo: isOccupied ? allocateeName.trim() : null,
         phone: isOccupied ? allocateePhone.trim() : null,
         startDate: isOccupied ? startDate : null,
         deposit: isOccupied ? Number(deposit) : null,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp()}, { merge: true });
+      batch.set(doc(db, 'seatAvailability', selectedSeatId), {
+        seatId: selectedSeatId,
+        isOccupied: isOccupied
       }, { merge: true });
+      await batch.commit();
       
       // Update local state manually in case quota is exceeded and listener is dead
       setSeats(prev => ({
@@ -101,16 +106,21 @@ export function SeatManagement() {
     setActionLoading(true);
         
     try {
-      await setDoc(doc(db, 'seats', selectedSeatId), {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'seats', selectedSeatId), {
         seatId: selectedSeatId,
         isOccupied: false,
         allocatedTo: null,
         phone: null,
         startDate: null,
         deposit: null,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp()}, { merge: true });
+      batch.set(doc(db, 'seatAvailability', selectedSeatId), {
+        seatId: selectedSeatId,
+        isOccupied: false
       }, { merge: true });
-      
+      await batch.commit();
+         
       // Update local state manually in case quota is exceeded and listener is dead
       setSeats(prev => ({
         ...prev,

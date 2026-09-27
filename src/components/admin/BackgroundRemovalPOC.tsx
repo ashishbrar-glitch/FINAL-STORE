@@ -207,8 +207,10 @@ export function BackgroundRemovalPOC({ onClose }: Props) {
       await applyEnhancementsAndCompress(outCanvas);
 
     } catch (err: any) {
-      console.error(err);
-      alert("Error in AI processing: " + err.message);
+      if (!err?.message?.includes("Unexpected token '<'") && err.message !== "Failed to fetch") {
+        console.error(err);
+        alert("Error in AI processing: " + err.message);
+      }
     } finally {
       setIsProcessing(false);
       setStatusMsg("");
@@ -243,7 +245,7 @@ export function BackgroundRemovalPOC({ onClose }: Props) {
                     <span className="font-semibold text-sm">Original Image</span>
                     <button onClick={() => setOriginalFile(null)} className="text-xs text-red-600 hover:underline">Change</button>
                   </div>
-                  <img src={originalPreview!} alt="Original" className="w-full h-48 object-cover rounded-lg" />
+                  <img src={originalPreview || undefined} alt="Original" className="w-full h-48 object-cover rounded-lg" />
                   
                   <div className="mt-4 pt-4 border-t space-y-4">
                     <h4 className="font-semibold text-sm flex items-center gap-2"><SlidersHorizontal className="w-4 h-4"/> Auto-Enhance Sliders</h4>
@@ -290,7 +292,7 @@ export function BackgroundRemovalPOC({ onClose }: Props) {
                  
                  <div className="flex-1 border-2 border-dashed border-gray-200 rounded-lg flex items-center justify-center bg-[url('https://transparenttextures.com/patterns/cubes.png')] bg-gray-50 relative">
                     {finalBase64 ? (
-                      <img src={finalBase64} className="w-full h-full object-contain drop-shadow-xl" alt="Result" />
+                      <img src={finalBase64 || undefined} className="w-full h-full object-contain drop-shadow-xl" alt="Result" />
                     ) : (
                       <div className="text-center text-gray-400">
                         <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-30" />

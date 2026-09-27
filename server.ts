@@ -3,9 +3,16 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+import { initializeApp } from "firebase/app";
+import { getFirestore, runTransaction, doc, getDocs, collection } from "firebase/firestore";
+import { initializeApp as initAdminApp, applicationDefault } from "firebase-admin/app";
+import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
+import { getAuth as getAdminAuth } from "firebase-admin/auth";
+import fs from "fs";
+import { initAIWorker } from "./server/aiWorker.ts";
 
 dotenv.config();
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 let aiClient: GoogleGenAI | null = null;
 function getAiClient() {
@@ -17,117 +24,132 @@ function getAiClient() {
   return aiClient;
 }
 
-const PRODUCTS = [
-  { id: '1', name: 'Aashirvaad Atta (5kg)', price: 210, category: 'Grocery', image: '🌾' },
-  { id: '2', name: 'Tata Salt (1kg)', price: 25, category: 'Grocery', image: '🧂' },
-  { id: '3', name: 'Toor Dal (1kg)', price: 160, category: 'Grocery', image: '🥣' },
-  { id: '4', name: 'Maggi Noodles (140g)', price: 30, category: 'Grocery', image: '🍜' },
-  { id: '5', name: 'Paracetamol Strip', price: 15, category: 'Medicine', image: '💊' },
-  { id: '6', name: 'LED Bulb 9W', price: 100, category: 'Hardware', image: '💡' },
-  { id: '7', name: 'Notebook 200 Pages', price: 45, category: 'Stationery', image: '📓' },
-  { id: '8', name: 'Amul Milk (1L)', price: 64, category: 'Grocery', image: '🥛' },
-  { id: '9', name: 'Sugar (1kg)', price: 42, category: 'Grocery', image: '🍬' },
-  { id: '10', name: 'Tea Leaves (250g)', price: 120, category: 'Grocery', image: '☕' },
-  { id: '11', name: 'Onion (1kg)', price: 40, category: 'Grocery', image: '🧅' },
-  { id: '12', name: 'Potato (1kg)', price: 30, category: 'Grocery', image: '🥔' },
-];
+
+// Initialize Firebase for server
+let db: any = null;
+let firebaseConfig: any = null;
+let adminDb = null;
+let adminAuth: any = null;
+try {
+  firebaseConfig = JSON.parse(fs.readFileSync('./firebase-applet-config.json', 'utf8'));
+  const firebaseApp = initializeApp(firebaseConfig);
+  db = getFirestore(firebaseApp);
+  
+  const adminApp = initAdminApp({
+    credential: applicationDefault(),
+    projectId: firebaseConfig.projectId
+  });
+  adminDb = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || '(default)');
+  adminAuth = getAdminAuth(adminApp);
+} catch (e) {
+  console.error("Failed to initialize Firebase on server:", e);
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-  
+
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  app.get("/api/products", (req, res) => {
-    res.json(PRODUCTS);
+async function verifyAdminAuth(req, res, requiredRoles = ['manager', 'admin', 'superadmin']) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decoded = await adminAuth.verifyIdToken(token);
+    const uid = decoded.uid;
+    const userDoc = await adminDb.collection("users").doc(uid).get();
+    if (!userDoc.exists) {
+      res.status(403).json({ error: "Forbidden: user doc not found" });
+      return null;
+    }
+    const role = userDoc.data().role;
+    if (!requiredRoles.includes(role)) {
+      res.status(403).json({ error: "Forbidden: insufficient role" });
+      return null;
+    }
+    return { uid, role };
+  } catch (e) {
+    res.status(401).json({ error: "Invalid token" });
+    return null;
+  }
+}
+
+
+
+  app.delete("/api/admin/users/:uid", async (req, res) => {
+    const authData = await verifyAdminAuth(req, res, ['admin', 'superadmin']);
+    if (!authData) return;
+    
+    try {
+      const targetUid = req.params.uid;
+      
+      const targetDoc = await adminDb.collection("users").doc(targetUid).get();
+      if (targetDoc.exists) {
+         const targetRole = targetDoc.data().role;
+         if (targetRole === 'superadmin' && authData.role !== 'superadmin') {
+            return res.status(403).json({ error: "Only superadmin can delete a superadmin" });
+         }
+      }
+      
+      try {
+        await adminAuth.deleteUser(targetUid);
+      } catch (e) {
+        if (e.code !== 'auth/user-not-found') throw e;
+      }
+      
+      await adminDb.collection("users").doc(targetUid).delete();
+      
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
-  app.post("/api/search", async (req, res) => {
+  app.post("/api/admin/users", async (req, res) => {
+    const authData = await verifyAdminAuth(req, res, ['admin', 'superadmin']);
+    if (!authData) return;
+    
     try {
-      const { query, products } = req.body;
-      if (!query || !products) {
-        return res.status(400).json({ error: "Missing query or products" });
+      const { email, password, role } = req.body;
+      if (!email || !password || !role) {
+         return res.status(400).json({ error: "Missing required fields" });
       }
-
-      // Strip large fields like images to heavily reduce token usage and prevent 429 Resource Exhausted errors
-      const minimalProducts = products.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        nameHi: p.nameHi,
-        nameEn: p.nameEn,
-        category: p.category
-      }));
-
-      const ai = getAiClient();
-      const prompt = `You are an AI search assistant for a grocery store app.
-Given the following products:
-${JSON.stringify(minimalProducts)}
-
-The user searched for: "${query}".
-IMPORTANT INSTRUCTION: The 'name' field is often in a local language. The 'nameEn' field contains the proper English name and AI search keywords.
-If the user's query is in English, you MUST aggressively prioritize matching the query against the 'nameEn' and 'category' fields to find the perfect matches. 
-Identify spelling variations, similar words, Hindi/English variations, and intended product terms to find the best semantic matches.
-Return ONLY a JSON object with two fields:
-- "ids": an array of matching product IDs (e.g. ["1", "3"])
-- "terms": an array of related keywords or spelling variations (e.g. ["atta", "wheat", "flour"])
-
-Return an empty array for ids if none match. Do NOT wrap it in markdown block quotes.`;
-
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-          }
-        });
-      } catch (firstErr: any) {
-        const errMsg = String(firstErr);
-        if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("404") || errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
-          console.warn("Retrying with gemini-3.1-flash-lite as fallback...");
-          await sleep(2000);
-          response = await ai.models.generateContent({
-            model: "gemini-3.1-flash-lite",
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-            }
-          });
-        } else {
-          throw firstErr;
-        }
+      
+      // Strict role hierarchy
+      if (role === 'superadmin' && authData.role !== 'superadmin') {
+         return res.status(403).json({ error: "Only superadmin can create another superadmin" });
       }
-
-      let text = response.text || "{}";
-      text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-      try {
-        let parsed;
-        try {
-          parsed = JSON.parse(text);
-        } catch (e) {
-          const match = text.match(/\{[\s\S]*\}/);
-          if (match) {
-            parsed = JSON.parse(match[0]);
-          } else {
-            throw e;
-          }
-        }
-        const ids = Array.isArray(parsed) ? parsed : (parsed.ids || []);
-        const terms = parsed.terms || [];
-        res.json({ ids, terms });
-      } catch (parseError) {
-        console.error("AI returned invalid JSON:", text);
-        res.status(500).json({ error: "Invalid JSON from AI" });
+      if (role === 'admin' && authData.role !== 'superadmin') {
+         return res.status(403).json({ error: "Only superadmin can create another admin" });
       }
-    } catch (error) {
-      console.error("AI Search API Error:", error);
-      res.status(500).json({ error: String(error) });
+      
+      const userRecord = await adminAuth.createUser({
+         email,
+         password,
+      });
+      
+      await adminDb.collection("users").doc(userRecord.uid).set({
+         uid: userRecord.uid,
+         email: email,
+         role: role,
+         createdAt: Date.now()
+      });
+      
+      res.json({ success: true, uid: userRecord.uid });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
   app.post("/api/translate-admin", async (req, res) => {
+    const authData = await verifyAdminAuth(req, res);
+    if (!authData) return;
+
     try {
       const { text, type } = req.body;
       if (!text) {
@@ -150,128 +172,97 @@ Return an empty array for ids if none match. Do NOT wrap it in markdown block qu
       let response;
       try {
         response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite",
+          model: "gemini-3.8-flash",
           contents: prompt,
-          config: {
-            temperature: 0.2,
-            responseMimeType: "application/json",
-          }
+          config: { responseMimeType: "application/json" }
         });
-      } catch (firstErr: any) {
-        console.warn("Translation retry with gemini-3.1-flash-lite...");
+      } catch (err: any) {
+        console.warn("Translation retry...");
         await sleep(2000);
         response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite",
+          model: "gemini-3.8-flash",
           contents: prompt,
-          config: {
-            temperature: 0.2,
-            responseMimeType: "application/json",
-          }
+          config: { responseMimeType: "application/json" }
         });
       }
 
       let responseText = response.text || "{}";
-      try {
-        const json = JSON.parse(responseText);
-        res.json(json);
-      } catch (e) {
-        res.status(500).json({ error: "Invalid JSON from AI" });
-      }
+      const json = JSON.parse(responseText);
+      res.json(json);
     } catch (error) {
       console.error("Translate API Error:", error);
       res.status(500).json({ error: String(error) });
     }
   });
 
-  app.post("/api/analyze-catalog", async (req, res) => {
+  // NEW ENRICHMENT PIPELINE
+  app.post("/api/migrate-product-recommendations", async (req, res) => {
     try {
-      const { products, categories } = req.body;
-      if (!products) {
-        return res.status(400).json({ error: "Missing products" });
-      }
-
-      // Strip large fields
-      const minimalProducts = products.map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        nameHi: p.nameHi,
-        nameEn: p.nameEn,
-        category: p.category
-      }));
+      const authData = await verifyAdminAuth(req, res);
+      if (!authData) return;
       
-      const minimalCategories = categories ? categories.map((c: any) => ({
-        id: c.id,
-        name: c.nameEn,
-        nameHi: c.nameHi,
-        description: c.description
-      })) : [];
-
-      const ai = getAiClient();
-      const prompt = `You are an AI for a grocery store app.
-Given the following products:
-${JSON.stringify(minimalProducts)}
-
-And the following categories:
-${JSON.stringify(minimalCategories)}
-
-Analyze the COMPLETE current product and category catalog.
-For every product, independently decide which other available products should be shown immediately after it to create an ORDERED "what should appear next" list.
-The recommendations must be based on complementary shopping needs, products commonly useful together, cross-category shopping relationships, natural shopping journeys, and the actual available catalog.
-Do NOT create simple product groups.
-Do NOT make every product in a group point to every other product.
-Do NOT require relationships to be bidirectional.
-Do NOT assume similar products are automatically useful together.
-Do NOT hard-code product relationships.
-Do NOT limit the number of meaningful recommendations.
-The returned array order is critical: position 1 = best product to show next, position 2 = second best, and so on.
-Each recommendation must use an existing product ID from the current catalog.
-A product can recommend products from completely different categories when you determine they are useful together.
-The saved relations must represent: "WHEN THIS PRODUCT IS SHOWN, THESE PRODUCTS SHOULD BE SHOWN NEXT IN THIS ORDER."
-Return ONLY a JSON object where the keys are product IDs, and the values are arrays of ordered related product IDs.
-Do NOT wrap it in markdown block quotes.`;
-
-      let response;
-      try {
-        response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite",
-          contents: prompt,
-          config: { responseMimeType: "application/json" }
-        });
-      } catch (firstErr: any) {
-        const errMsg = String(firstErr);
-        if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("404") || errMsg.includes("429") || errMsg.includes("quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
-          console.warn("Retrying with fallback...");
-          await sleep(2000);
-          response = await ai.models.generateContent({
-            model: "gemini-3.1-flash-lite",
-            contents: prompt,
-            config: { responseMimeType: "application/json" }
-          });
-        } else {
-          throw firstErr;
-        }
+      // Migration Logic
+      const oldSnap = await adminDb.collection('productRelationships').get();
+      let scanned = 0;
+      let created = 0;
+      let skippedExisting = 0;
+      let skippedInvalid = 0;
+      
+      for (const docSnap of oldSnap.docs) {
+          scanned++;
+          const data = docSnap.data();
+          if (!data.participants || data.participants.length !== 2) {
+             skippedInvalid++;
+             continue;
+          }
+          
+          const [A, B] = data.participants;
+          
+          const createRel = async (sourceId, targetId, legacyData) => {
+             const newId = `${sourceId}_${targetId}`;
+             const newRef = adminDb.collection('productRecommendations').doc(newId);
+             const existing = await newRef.get();
+             if (existing.exists) {
+                 return false; // Skip
+             }
+             
+             const newFields = {
+                sourceProductId: sourceId,
+                targetProductId: targetId,
+                type: legacyData.type || 'similar',
+                placement: legacyData.type === 'complementary' ? 'goes_well_with' : 'similar_products',
+                confidence: legacyData.confidence || 0.8,
+                priority: legacyData.type === 'complementary' ? 80 : 50,
+                categoryFit: 0.8,
+                priceFit: 0.8,
+                bestsellerBoost: 0,
+                status: legacyData.status || 'pending',
+                source: legacyData.source || 'ai',
+                createdAt: legacyData.createdAt || Date.now(),
+                updatedAt: legacyData.updatedAt || Date.now()
+             };
+             await newRef.set(newFields);
+             return true;
+          };
+          
+          if (await createRel(A, B, data)) { created++; } else { skippedExisting++; }
+          if (await createRel(B, A, data)) { created++; } else { skippedExisting++; }
       }
-
-      let text = response.text || "{}";
-      text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-      // To handle cases where there's trailing garbage after the JSON object
-      try {
-        res.json(JSON.parse(text));
-      } catch (parseError) {
-        // Fallback: try to extract the JSON object using regex
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match) {
-          res.json(JSON.parse(match[0]));
-        } else {
-          throw parseError;
-        }
-      }
-    } catch (error) {
-      console.error("AI Catalog Analysis Error:", error);
-      res.status(500).json({ error: String(error) });
+      
+      res.json({
+        success: true,
+        scanned,
+        created,
+        skippedExisting,
+        skippedInvalid
+      });
+      
+    } catch (e: any) {
+      console.error("Migration error:", e);
+      res.status(500).json({ error: e.message });
     }
   });
-
+  initAIWorker(adminDb, adminAuth, getAiClient, app);
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

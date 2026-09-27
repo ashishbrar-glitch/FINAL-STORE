@@ -1,3 +1,5 @@
+import { normalizeStr } from './lib/search/normalize';
+import { Product, CartItem, Category, ProductRecommendation } from './types';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -5,6 +7,7 @@
 
 import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import Fuse from "fuse.js";
 import {
   PhoneCall,
   MapPin,
@@ -46,7 +49,8 @@ import { AdminDashboard } from "./components/AdminDashboard";
 import ScooterRider from "./components/ScooterRider";
 import Confetti from "react-confetti";
 import { doc, getDoc, collection, getDocs, getDocsFromCache, setDoc, updateDoc, query, limit, startAfter, where, onSnapshot } from "firebase/firestore";
-import { db } from "./lib/firebase";
+import { db, auth } from "./lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 import { AdminCategoryModal } from "./components/admin/AdminCategoryModal";
 import { AdminProductModal } from "./components/admin/AdminProductModal";
 
@@ -102,31 +106,7 @@ type View =
   | "library-summary"
   | "admin-login"
   | "admin-dashboard";
-type CartItem = { id: string; quantity: number };
-type Product = {
-  id: string;
-  name: string;
-  nameHi?: string;
-  nameEn?: string;
-  price: number;
-  mrp?: number;
-  category: string;
-  image: string;
-  unit?: string;
-  isActive?: boolean;
-  isAvailable?: boolean;
-  isBestseller?: boolean;
-};
-type Category = {
-  id: string;
-  nameEn: string;
-  nameHi: string;
-  emoji?: string;
-  iconType?: string;
-  imageUrl?: string;
-  displayOrder: number;
-  isActive: boolean;
-};
+
 
 const PHONE_NUMBER = "918601866018";
 
@@ -145,78 +125,134 @@ function getSortWeight(id: string) {
 
 
 
-function CrossSellToast({ 
-  sourceProduct, 
-  recommendations, 
-  products, 
-  onClose, 
-  onAddToCart 
-}: { 
+
+const RECOMMENDATION_WEIGHTS = {
+  complementary: 100,
+  similar: 50,
+  priority: 0.2,
+  categoryFit: 10,
+  bestsellerBoost: 5,
+  priceFit: 5,
+  confidence: 2
+};
+
+function scoreRecommendation(
+  candidate: Product,
+  sourceProduct: Product,
+  rel: ProductRecommendation
+): number {
+  let score = 0;
+  
+  if (rel.type === "complementary") score += RECOMMENDATION_WEIGHTS.complementary;
+  else if (rel.type === "similar") score += RECOMMENDATION_WEIGHTS.similar;
+  
+  score += (rel.categoryFit ?? (candidate.category === sourceProduct.category ? 1 : 0)) * RECOMMENDATION_WEIGHTS.categoryFit;
+  score += (rel.priority || 0) * RECOMMENDATION_WEIGHTS.priority;
+  score += (rel.bestsellerBoost ?? (candidate.isBestseller ? 1 : 0)) * RECOMMENDATION_WEIGHTS.bestsellerBoost;
+  
+  const defaultPriceFit = sourceProduct.price > 0 && candidate.price > 0
+    ? 1 - Math.min((Math.max(sourceProduct.price, candidate.price) / Math.min(sourceProduct.price, candidate.price) - 1), 1)
+    : 0.5;
+  score += (rel.priceFit ?? defaultPriceFit) * RECOMMENDATION_WEIGHTS.priceFit;
+  
+  score += (rel.confidence || 0) * RECOMMENDATION_WEIGHTS.confidence;
+  
+  return score;
+}
+
+function RecommendationRow({
+  sourceProduct,
+  products,
+  onClose,
+  onAddToCart
+}: {
   sourceProduct: Product;
-  recommendations: Record<string, string[]>;
   products: Product[];
   onClose: () => void;
   onAddToCart: (id: string, delta: number) => void;
 }) {
-  const recommendedIds = recommendations[sourceProduct.id] || [];
-  let recommendedProducts = recommendedIds
-    .map(id => products.find(p => p.id === id))
-    .filter(Boolean) as Product[];
+  const [candidates, setCandidates] = useState<{ product: Product, rel: ProductRecommendation }[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  if (recommendedProducts.length === 0) {
-    recommendedProducts = products.filter(p => p.isBestseller && p.id !== sourceProduct.id).slice(0, 2);
-  }
-  if (recommendedProducts.length === 0) {
-    recommendedProducts = products.filter(p => p.id !== sourceProduct.id).slice(0, 2);
-  }
+  useEffect(() => {
+    setLoading(true);
+    const q = query(
+      collection(db, "productRecommendations"),
+      where("sourceProductId", "==", sourceProduct.id),
+      where("status", "==", "approved")
+    );
+    
+    const unsub = onSnapshot(q, (snap) => {
+       const bestCandidates = new Map<string, { product: Product, rel: ProductRecommendation }>();
+       
+       snap.forEach(docSnap => {
+          const rel = docSnap.data() as ProductRecommendation;
+          
+          const p = products.find(prod => prod.id === rel.targetProductId);
+          if (p && p.isActive && p.isAvailable) {
+             const currentScore = scoreRecommendation(p, sourceProduct, rel);
+             const existing = bestCandidates.get(rel.targetProductId);
+             if (!existing || currentScore > scoreRecommendation(existing.product, sourceProduct, existing.rel)) {
+                bestCandidates.set(rel.targetProductId, { product: p, rel });
+             }
+          }
+       });
+       
+       const results = Array.from(bestCandidates.values());
+       
+       // Rank candidates using the score function
+       results.sort((a, b) => scoreRecommendation(b.product, sourceProduct, b.rel) - scoreRecommendation(a.product, sourceProduct, a.rel));
+       
+       setCandidates(results);
+       setLoading(false);
+    });
+    
+    return () => unsub();
+  }, [sourceProduct.id, products]);
 
-  if (recommendedProducts.length === 0) return null;
-
-  // Take top 2
-  const topRecommendations = recommendedProducts.slice(0, 2);
+  if (loading) return null;
+  if (candidates.length === 0) return null;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 50, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 50, scale: 0.95 }}
-      className="fixed bottom-24 left-4 right-4 md:left-auto md:right-4 md:w-96 bg-white rounded-2xl shadow-2xl border border-blue-100 z-[999] overflow-hidden"
-    >
-      <div className="bg-blue-50 px-4 py-3 flex items-center justify-between border-b border-blue-100">
-        <h4 className="font-bold text-blue-900 text-sm">Added! Goes great with:</h4>
-        <button onClick={onClose} className="text-blue-500 hover:text-blue-700 bg-blue-100/50 p-1 rounded-full">
+    <div className="w-full mt-6 mb-8 px-2">
+      <div className="flex items-center justify-between mb-4 px-2">
+        <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-[#0e783a]" /> Goes well with
+        </h3>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 bg-gray-100 p-1.5 rounded-full transition-colors">
           <X className="w-4 h-4" />
         </button>
       </div>
-      <div className="p-3 space-y-3">
-        {topRecommendations.map(prod => (
-          <div key={prod.id} className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gray-50 rounded-lg overflow-hidden shrink-0 flex items-center justify-center border border-gray-100">
-              {prod.image ? (
-                <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-xl font-bold text-gray-400">{prod.name.charAt(0)}</span>
-              )}
+      <div className="flex overflow-x-auto gap-4 pb-4 px-2 snap-x hide-scrollbar" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        {candidates.map(({ product }) => (
+          <div key={product.id} className="snap-start shrink-0 w-40 bg-white border border-gray-100 rounded-[16px] shadow-sm flex flex-col p-2 relative">
+            <div className="w-full aspect-square bg-[#F4F6F8] rounded-[12px] mb-2 flex items-center justify-center overflow-hidden">
+               {product.image ? (
+                 <img src={product.image || undefined} alt={product.name} className="w-full h-full object-cover mix-blend-multiply" />
+               ) : (
+                 <span className="text-4xl">🛒</span>
+               )}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-800 truncate">{prod.name}</p>
-              <p className="text-xs text-blue-600 font-bold">₹{prod.price}</p>
+            <div className="flex flex-col flex-1">
+              <h4 className="text-xs font-bold text-gray-800 line-clamp-2 mb-1">{product.name}</h4>
+              <span className="text-xs text-gray-500 mb-2">{product.unit || '1 unit'}</span>
+              <div className="mt-auto flex items-center justify-between">
+                <span className="text-sm font-bold text-gray-900">₹{product.price}</span>
+                <button
+                  onClick={() => onAddToCart(product.id, 1)}
+                  className="w-8 h-8 rounded-full bg-[#0c831f] text-white flex items-center justify-center shadow-sm hover:bg-[#0b731b] active:scale-95 transition-transform"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => {
-                onAddToCart(prod.id, 1);
-                onClose();
-              }}
-              className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 active:scale-95 transition-transform shrink-0"
-            >
-              Add
-            </button>
           </div>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 }
+
 
 
 const SUGGESTED_BUNDLES = [
@@ -276,7 +312,7 @@ function MainContent() {
     } catch(e) {}
   }, []);
   const [learnedSearches, setLearnedSearches] = useState<Record<string, {ids: string[], terms: string[]}>>({});
-  const [recommendations, setRecommendations] = useState<Record<string, string[]>>({});
+  
   const [lastSyncHash, setLastSyncHash] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
@@ -285,33 +321,13 @@ function MainContent() {
     return ["All", ...cats];
   }, [products]);
 
-  const connectedProducts = useMemo(() => {
-    if (displayedProducts.length === 0) return [];
-    
-    const connectedIds = new Set<string>();
-    displayedProducts.forEach(p => {
-      const rels = recommendations[p.id] || [];
-      rels.forEach(r => connectedIds.add(r));
-    });
-    
-    // Remove products that are already in the main search results
-    displayedProducts.forEach(p => connectedIds.delete(p.id));
-    
-    // Map to actual current products (automatically handles deleted products by filtering Boolean)
-    return Array.from(connectedIds)
-      .map(id => products.find(p => p.id === id))
-      .filter(Boolean) as Product[];
-  }, [searchQuery, displayedProducts, recommendations, products]);
+  
 
   // Order State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [crossSellSource, setCrossSellSource] = useState<Product | null>(null);
 
-  useEffect(() => {
-    if (true) {
-      setCrossSellSource(null);
-    }
-  }, [currentView]);
+
 
   // Library State
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
@@ -398,13 +414,33 @@ function MainContent() {
     }
   };
 
-  // Restore admin session from localStorage
+  // Restore admin session from localStorage and monitor Firebase Auth
   useEffect(() => {
-    const role = localStorage.getItem("adminSessionRole");
-    if (role) {
-      setAdminRole(role);
-    }
-  }, []);
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setAdminRole(null);
+        if (currentView === "admin-dashboard") {
+          setCurrentView("admin-login");
+        }
+      } else {
+        try {
+          const d = await getDoc(doc(db, "users", user.uid));
+          if (!d.exists()) {
+            setAdminRole(null);
+                if (currentView === "admin-dashboard") {
+              setCurrentView("admin-login");
+            }
+          } else {
+            const role = d.data().role;
+            setAdminRole(role);
+          }
+        } catch(e) {
+          console.error("Auth sync error:", e);
+        }
+      }
+    });
+    return () => unsub();
+  }, [currentView]);
 
   useEffect(() => {
     let currentCatSnap: any = null;
@@ -431,18 +467,41 @@ function MainContent() {
       setHasMoreProducts(currentProdSnap.docs.length === 40);
       const prodList = currentProdSnap.docs.map((doc: any, idx: number) => {
         const data = doc.data();
+        // Migrate legacy aliases if present
+        let manualSearchAliases = data.manualSearchAliases || [];
+        if (data.searchAliases && Array.isArray(data.searchAliases)) {
+          const newAliases = data.searchAliases.filter((a: string) => !manualSearchAliases.includes(a));
+          manualSearchAliases = [...manualSearchAliases, ...newAliases];
+        }
+
         return {
           id: doc.id,
           name: data.name,
-          nameHi: data.nameHi,
+          nameEn: data.nameEn || '',
+          nameHi: data.nameHi || '',
+          brand: data.brand || '',
+          category: catList.find((c: any) => c.id === (data.categoryId || data.category))?.nameEn || data.category || data.categoryId || "Uncategorized",
+          categoryId: data.categoryId || '',
+          subcategory: data.subcategory || '',
+          variant: data.variant || '',
+          unit: data.unit || '',
+          attributes: data.attributes || {},
           price: data.price,
           mrp: data.mrp,
-          category: catList.find((c: any) => c.id === (data.categoryId || data.category))?.nameEn || data.category || data.categoryId || "Uncategorized",
           image: data.imageUrl || data.image,
-          unit: data.unit,
           isActive: data.isActive ?? true,
           isAvailable: data.isAvailable ?? true,
           isBestseller: data.isBestseller ?? (idx === 0 || idx === 3),
+          manualSearchAliases,
+          aiSearchAliases: data.aiSearchAliases || [],
+          searchStatus: data.searchStatus || 'pending',
+          searchError: data.searchError || null,
+          searchErrorAt: data.searchErrorAt || null,
+          processingAttempts: data.processingAttempts || 0,
+          processingStartedAt: data.processingStartedAt || null,
+          processingJobId: data.processingJobId || null,
+          lastProcessedAt: data.lastProcessedAt || null,
+          productVersion: data.productVersion || 0,
         };
       }) as Product[];
       // Sort items randomly but stably per page load
@@ -505,61 +564,14 @@ function MainContent() {
       console.warn("Learnings fetch error:", err);
     });
 
-    const unsubRecommendations = onSnapshot(doc(db, "system", "recommendations"), (docSnap) => {
-      if (docSnap.exists()) {
-        setRecommendations(docSnap.data().relations || {});
-      }
-    }, (err: any) => {
-      console.warn("Recommendations fetch error:", err);
-    });
-
-    return () => {
+            return () => {
       unsubCats();
       unsubProds();
       unsubLearnings();
-      unsubRecommendations();
     };
   }, []);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    const hash = products.map(p => p.id + p.name + p.category).join('|') + dbCategories.map(c => c.id + c.nameEn).join('|');
-    if (hash && hash !== lastSyncHash) {
-      const minimalProducts = products.map(p => ({
-        id: p.id,
-        name: p.name,
-        nameHi: p.nameHi,
-        nameEn: p.nameEn,
-        category: p.category
-      }));
-      
-      const minimalCategories = dbCategories.map(c => ({
-        id: c.id,
-        name: c.nameEn,
-        nameHi: c.nameHi,
-        description: c.description
-      }));
-
-      // Trigger catalog relations sync
-      fetch('/api/analyze-catalog', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: minimalProducts, categories: minimalCategories })
-      })
-      .then(async res => {
-        if (!res.ok) {
-           const text = await res.text();
-           throw new Error(text);
-        }
-        return res.json();
-      })
-      .then(relations => {
-        setDoc(doc(db, "system", "recommendations"), { relations, updatedAt: Date.now() });
-      })
-      .catch(err => console.error("Failed to sync catalog relations:", err));
-    }
-    if (hash) setLastSyncHash(hash);
-  }, [products, dbCategories, isAdmin, lastSyncHash]);
+  
 
   const loadMoreProducts = async () => { return; /* Disabled to load all */
     if (!lastProductDoc) return;
@@ -567,20 +579,42 @@ function MainContent() {
     const processSnapshot = (snapshot: any) => {
       const newProds = snapshot.docs.map((doc: any, idx: number) => {
         const data = doc.data();
+        let manualSearchAliases = data.manualSearchAliases || [];
+        if (data.searchAliases && Array.isArray(data.searchAliases)) {
+          const newAliases = data.searchAliases.filter((a: string) => !manualSearchAliases.includes(a));
+          manualSearchAliases = [...manualSearchAliases, ...newAliases];
+        }
+
         return {
           id: doc.id,
           name: data.name,
-          nameHi: data.nameHi,
+          nameEn: data.nameEn || '',
+          nameHi: data.nameHi || '',
+          brand: data.brand || '',
+          category: dbCategories.find((c: any) => c.id === (data.categoryId || data.category))?.nameEn || data.category || data.categoryId || "Uncategorized",
+          categoryId: data.categoryId || '',
+          subcategory: data.subcategory || '',
+          variant: data.variant || '',
+          unit: data.unit || '',
+          attributes: data.attributes || {},
           price: data.price,
           mrp: data.mrp,
-          category: dbCategories.find((c: any) => c.id === (data.categoryId || data.category))?.nameEn || data.category || data.categoryId || "Uncategorized",
           image: data.imageUrl || data.image,
-          unit: data.unit,
           isActive: data.isActive ?? true,
           isAvailable: data.isAvailable ?? true,
           isBestseller: data.isBestseller ?? false,
+          manualSearchAliases,
+          aiSearchAliases: data.aiSearchAliases || [],
+          searchStatus: data.searchStatus || 'pending',
+          searchError: data.searchError || null,
+          searchErrorAt: data.searchErrorAt || null,
+          processingAttempts: data.processingAttempts || 0,
+          processingStartedAt: data.processingStartedAt || null,
+          processingJobId: data.processingJobId || null,
+          lastProcessedAt: data.lastProcessedAt || null,
+          productVersion: data.productVersion || 0,
         };
-      });
+      }) as Product[];
       
       setProducts(prev => [...prev, ...newProds]);
       
@@ -624,12 +658,12 @@ function MainContent() {
         setOccupiedSeats(occupied);
       };
 
-      unsub = onSnapshot(collection(db, "seats"), (snapshot) => {
+      unsub = onSnapshot(collection(db, "seatAvailability"), (snapshot) => {
         processSeats(snapshot);
       }, (err: any) => {
         if (!(err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota'))) console.error('Seat fetch error:', err);
         if (err?.code === 'resource-exhausted' || err?.message?.toLowerCase().includes('quota')) {
-          getDocsFromCache(collection(db, "seats"))
+          getDocsFromCache(collection(db, "seatAvailability"))
             .then(processSeats)
             .catch(cacheErr => console.warn("Cache fallback for seats failed:", cacheErr));
         }
@@ -639,14 +673,54 @@ function MainContent() {
     return () => unsub();
   }, [currentView]); // Re-fetch seats when opening the library
 
+  
   // Handle Search & Filter
-  useEffect(() => {
-    const lowerQuery = searchQuery.trim().toLowerCase();
 
-    // 1. Filter by category
-    let categoryMatches = products;
+  // 1. Memoize active catalog and Fuse index
+  const activeProducts = useMemo(() => {
+    return products.filter(p => p.isActive !== false && p.isAvailable !== false);
+  }, [products]);
+
+  const fuseActiveProducts = useMemo(() => {
+    return activeProducts.map(p => {
+      let attrValues = [];
+      if (p.attributes) {
+        Object.entries(p.attributes).forEach(([k, v]) => {
+           if (k) attrValues.push(String(k));
+           if (v) attrValues.push(String(v));
+        });
+      }
+      return {
+        item: p,
+        _searchStr: [
+          p.name, p.nameEn, p.nameHi, p.brand, p.category, p.subcategory, p.variant, p.unit,
+          ...(p.manualSearchAliases || []),
+          ...(p.aiSearchAliases || []),
+          ...attrValues
+        ].filter(Boolean).join(" ")
+      };
+    });
+  }, [activeProducts]);
+
+  const fuse = useMemo(() => {
+    return new Fuse(fuseActiveProducts, {
+      keys: ['_searchStr'],
+      threshold: 0.4,
+      ignoreLocation: true,
+      ignoreFieldNorm: true,
+      minMatchCharLength: 2,
+      includeScore: true
+    });
+  }, [fuseActiveProducts]);
+
+
+
+  useEffect(() => {
+    const lowerQuery = normalizeStr(searchQuery);
+
+    let categoryMatches = activeProducts;
     if (selectedCategory !== "All") {
-      categoryMatches = products.filter(p => p.category === selectedCategory);
+      categoryMatches = activeProducts.filter(p => p.category === selectedCategory);
     }
 
     if (!lowerQuery) {
@@ -655,118 +729,64 @@ function MainContent() {
       return;
     }
 
-    // 2. Instant local search on categoryMatches for smooth typing
-    let localMatches = categoryMatches.filter(
-      (p) =>
-        p.name.toLowerCase().includes(lowerQuery) ||
-        p.category.toLowerCase().includes(lowerQuery) ||
-        (p.nameEn && p.nameEn.toLowerCase().includes(lowerQuery)),
-    );
-
-    // 2.5. Apply learned AI mappings (fast local lookup)
-    let hasExactLearnedMatch = false;
+    // 1. Gather candidates & Fuzzy match against category filter
+    const fuseResults = fuse.search(lowerQuery).filter(r => 
+      selectedCategory === "All" || r.item.item.category === selectedCategory
+    ).map(r => ({ ...r, item: r.item.item }));
     
-    // Check if we already have an exact learned search mapping
+    // 2. Exact matches
+    const exactMatches = categoryMatches.filter(p => {
+       const n1 = normalizeStr(p.name);
+       const n2 = normalizeStr(p.nameEn);
+       const n3 = normalizeStr(p.nameHi);
+       const aliases = [...(p.manualSearchAliases || []), ...(p.aiSearchAliases || [])].map(normalizeStr);
+       
+       return n1.includes(lowerQuery) || n2.includes(lowerQuery) || n3.includes(lowerQuery) || aliases.some(a => a.includes(lowerQuery));
+    });
+
+    // 3. Learned Matches (Retrieval signal only)
+    const learnedIds = new Set<string>();
     if (learnedSearches[lowerQuery]) {
-      hasExactLearnedMatch = true;
-      const learnedIds = learnedSearches[lowerQuery].ids;
-      const learnedProducts = products.filter(p => learnedIds.includes(p.id) && !localMatches.find(lm => lm.id === p.id));
-      localMatches = [...localMatches, ...learnedProducts];
+       learnedSearches[lowerQuery].ids.forEach((id: string) => learnedIds.add(id));
     } else {
-      // Fuzzy mapping check based on terms
-      const matchingLearnedIds = new Set<string>();
-      Object.entries(learnedSearches).forEach(([learnedQuery, data]: [string, any]) => {
-        // If query is similar or matches learned terms
-        if ((lowerQuery.length >= 3 && learnedQuery.includes(lowerQuery)) || data.terms.some(t => t.toLowerCase().includes(lowerQuery))) {
-           data.ids.forEach(id => matchingLearnedIds.add(id));
-        }
-      });
-      if (matchingLearnedIds.size > 0) {
-        const learnedProducts = products.filter(p => matchingLearnedIds.has(p.id) && !localMatches.find(lm => lm.id === p.id));
-        localMatches = [...localMatches, ...learnedProducts];
-      }
+       Object.entries(learnedSearches).forEach(([learnedQuery, data]: [string, any]) => {
+         if (lowerQuery.length >= 3 && (String(learnedQuery).includes(lowerQuery) || data.terms.some((t: string) => normalizeStr(t).includes(lowerQuery)))) {
+           data.ids.forEach((id: string) => learnedIds.add(id));
+         }
+       });
     }
+    
+    const learnedMatches = categoryMatches.filter(p => learnedIds.has(p.id));
 
-    setDisplayedProducts(localMatches);
-
-    // If we have an exact cached match, we don't need to ping AI again
-    if (hasExactLearnedMatch) {
-      setIsSearching(false);
-      return;
-    }
-
-    // 3. Debounced AI Deep Search
-    setIsSearching(true);
-    const abortController = new AbortController();
-
-    const performAISearch = async () => {
-      try {
-        const minimalSearchCatalog = products.map(p => ({
-          id: p.id,
-          name: p.name,
-          nameHi: p.nameHi,
-          nameEn: p.nameEn,
-          category: p.category
-        }));
-
-        const res = await fetch('/api/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: searchQuery, products: minimalSearchCatalog }),
-          signal: abortController.signal
-        });
-        
-        if (!res.ok) throw new Error('AI search failed');
-        
-        const data = await res.json();
-        
-        if (data.ids && Array.isArray(data.ids) && data.ids.length > 0) {
-          // Replace instant matches with AI matches preserving AI's intelligent order
-          // Filter by selectedCategory to respect the user's active filter
-          let aiMatches = data.ids.map((id: string) => products.find(p => p.id === id)).filter(Boolean) as Product[];
-          if (selectedCategory !== "All") {
-            aiMatches = aiMatches.filter(p => p.category === selectedCategory);
-          }
-          if (aiMatches.length > 0) {
-            setDisplayedProducts(aiMatches);
-            
-            // Save to database for future local mapping learning
-            const safeId = "q_" + encodeURIComponent(lowerQuery).replace(/\./g, '%2E');
-            if (safeId) {
-              try {
-                await setDoc(doc(db, "searchMappings", safeId), {
-                  query: lowerQuery,
-                  ids: data.ids,
-                  terms: data.terms || [],
-                  timestamp: Date.now()
-                }, { merge: true });
-              } catch (e) {
-                console.error("Failed to save search learning:", e);
-              }
-            }
-          }
-        }
-      } catch (error: any) {
-        if (error.name !== 'AbortError') {
-          console.error("AI Search fallback triggered:", error);
-          // Local matches are already displayed, so no fallback action is strictly needed here
-        }
-      } finally {
-        if (!abortController.signal.aborted) {
-          setIsSearching(false);
-        }
-      }
+    // Combine and Rank
+    // Rules: Exact > Fuzzy > Learned > Bestseller
+    const candidateMap = new Map<string, { product: Product, score: number }>();
+    
+    const addCandidate = (p: Product, baseScore: number) => {
+       // Hard filter just in case, though activeProducts already handles this
+       if (p.isActive === false || p.isAvailable === false) return; 
+       
+       let finalScore = baseScore;
+       if (p.isBestseller) finalScore += 0.05; // Tiny tie-breaker only
+       
+       const existing = candidateMap.get(p.id);
+       if (!existing || existing.score < finalScore) {
+          candidateMap.set(p.id, { product: p, score: finalScore });
+       }
     };
 
-    const timeoutId = setTimeout(() => {
-      performAISearch();
-    }, 250);
+    exactMatches.forEach(p => addCandidate(p, 10)); // Highest
+    fuseResults.forEach(r => addCandidate(r.item, 10 - (r.score || 0) * 5)); // Higher fuse score is worse (0 is perfect)
+    learnedMatches.forEach(p => addCandidate(p, 3)); // Moderate signal
 
-    return () => {
-      clearTimeout(timeoutId);
-      abortController.abort();
-    };
-  }, [searchQuery, products, selectedCategory]);
+    const rankedResults = Array.from(candidateMap.values())
+      .sort((a, b) => b.score - a.score)
+      .map(c => c.product);
+
+    setDisplayedProducts(rankedResults);
+    setIsSearching(false);
+  }, [searchQuery, activeProducts, selectedCategory, fuse, learnedSearches]);
+
 
   // --- ACTIONS ---
   const updateQuantity = (id: string, delta: number) => {
@@ -816,7 +836,7 @@ function MainContent() {
   const handleSendOrder = () => {
     if (cart.length === 0) return;
 
-    let message = "Hello BCN Store, I would like to place an order:\n\n";
+    let message = "Hello BCN Store, I would like to place an order:\import { normalizeStr } from './lib/search/normalize';\nn";
     try {
       const existingStr = localStorage.getItem("bcn_past_purchases");
       const existing = existingStr ? JSON.parse(existingStr) : [];
@@ -1134,7 +1154,7 @@ function MainContent() {
                             {product.image?.startsWith("http") ||
                             product.image?.startsWith("data:") ? (
                               <img
-                                src={product.image}
+                                src={product.image || undefined}
                                 alt={product.name}
                                 className="w-full h-full object-contain mix-blend-multiply hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
                               />
@@ -1234,7 +1254,7 @@ function MainContent() {
                           {product.image?.startsWith("http") ||
                           product.image?.startsWith("data:") ? (
                             <img
-                              src={product.image}
+                              src={product.image || undefined}
                               alt={product.name}
                               className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
                             />
@@ -1290,95 +1310,13 @@ function MainContent() {
             </div>
           )}
 
-          {connectedProducts.length > 0 && (
-            <div className="mt-8 mb-4">
-              <div className="flex items-center gap-2 mb-3 px-1">
-                <Sparkles className="w-5 h-5 text-purple-500" />
-                <h3 className="text-lg font-bold text-gray-800">Frequently Bought Together</h3>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {connectedProducts.map((product) => (
-                    <motion.div
-                      layout
-                      key={product.id}
-                      className="group bg-white border-gray-100 p-2 rounded-[16px] shadow-sm hover:shadow-md border flex flex-col justify-between h-full relative transition-all duration-300"
-                    >
-                      {isAdmin && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingProduct(product);
-                          }}
-                          className="absolute -top-1.5 -right-1.5 z-20 p-1.5 bg-white border border-gray-200 rounded-full shadow-md text-gray-400 hover:text-[#0c831f] transition-colors"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                        </button>
-                      )}
-                      
-                      <div className="flex flex-col">
-                        <div className={`w-full aspect-square bg-[#F4F6F8] rounded-[12px] mb-2 flex items-center justify-center text-4xl overflow-hidden relative ${product.isAvailable === false ? "grayscale opacity-50" : ""}`}>
-                          {product.isBestseller && (
-                            <div className="absolute top-0 left-0 bg-gradient-to-r from-[#FF7A00] to-[#FF9900] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br-[10px] z-10 shadow-sm">
-                              Bestseller
-                            </div>
-                          )}
-                          {product.image?.startsWith("http") ||
-                          product.image?.startsWith("data:") ? (
-                            <img
-                              src={product.image}
-                              alt={product.name}
-                              className="w-[85%] h-[85%] object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">{product.image}</div>
-                          )}
-                        </div>
-                        <h3 className="font-semibold text-gray-800 text-[12px] leading-[1.3] line-clamp-2 min-h-[31px]">
-                          {product.name}
-                        </h3>
-                      </div>
-                      <div className="mt-auto pt-2 flex items-center justify-between gap-1">
-                        <div className="flex flex-col shrink-0">
-                          {(product.mrp || 0) > product.price && (
-                            <span className="text-[10px] text-gray-400 line-through leading-none mb-0.5">₹{product.mrp}</span>
-                          )}
-                          <span className="text-gray-900 font-bold text-[13px] leading-none">
-                            ₹{product.price}
-                          </span>
-                        </div>
-                        
-                        {product.isAvailable === false ? (
-                          <div className="h-[28px] px-2 flex items-center justify-center rounded-lg border border-gray-200 text-[9px] font-bold uppercase tracking-wide bg-gray-50 text-gray-400 shrink-0">
-                            Out
-                          </div>
-                        ) : getQuantity(product.id) === 0 ? (
-                          <button
-                            onClick={() => updateQuantity(product.id, 1)}
-                            className="h-[28px] w-[64px] flex items-center justify-center rounded-lg border border-[#187D39]/30 text-[#187D39] bg-[#187D39]/5 hover:bg-[#187D39]/10 text-[12px] font-bold uppercase tracking-wide transition-colors active:scale-95 shrink-0"
-                          >
-                            ADD
-                          </button>
-                        ) : (
-                          <div className="flex items-center justify-between bg-[#187D39] text-white rounded-lg p-0.5 h-[28px] w-[64px] shadow-sm shrink-0">
-                            <button
-                              onClick={() => updateQuantity(product.id, -1)}
-                              className="w-6 h-full flex items-center justify-center active:scale-90"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="text-[13px] font-bold">{getQuantity(product.id)}</span>
-                            <button
-                              onClick={() => updateQuantity(product.id, 1)}
-                              className="w-6 h-full flex items-center justify-center active:scale-90"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-              ))}</div>
-            </div>
+          {crossSellSource && currentView !== "cart" && currentView !== "order" && (
+          <RecommendationRow
+            sourceProduct={crossSellSource}
+            products={products}
+            onClose={() => setCrossSellSource(null)}
+            onAddToCart={updateQuantity}
+          />
           )}
 
           {isSearching && displayedProducts.length === 0 && <FunnySearchSkeleton />}
@@ -1424,15 +1362,7 @@ function MainContent() {
         )}
         {adminModals}
         {globalOverlays}
-        {crossSellSource && currentView !== "cart" && currentView !== "order" && (
-          <CrossSellToast
-            sourceProduct={crossSellSource}
-            recommendations={recommendations}
-            products={products}
-            onClose={() => setCrossSellSource(null)}
-            onAddToCart={updateQuantity}
-          />
-        )}
+        
         {floatingCartFab}
       </div>
     );
@@ -1552,7 +1482,7 @@ function MainContent() {
                     <div>
                       <div className="aspect-square bg-gray-50 rounded-lg mb-2 overflow-hidden flex items-center justify-center">
                         {product.image ? (
-                          <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                          <img src={product.image || undefined} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
                         ) : (
                           <span className="text-2xl font-bold text-gray-300">{product.name.charAt(0)}</span>
                         )}
@@ -1857,7 +1787,7 @@ function MainContent() {
                     setCurrentView("order");
                   }}
                 >
-                  {cat.imageUrl ? <img src={cat.imageUrl} className="w-full h-full object-cover rounded-full" /> : cat.emoji}
+                  {cat.imageUrl ? <img src={cat.imageUrl || undefined} className="w-full h-full object-cover rounded-full" /> : cat.emoji}
                 </div>
                 <div className="text-center" onClick={() => {
                   setSelectedCategory(cat.nameEn);
