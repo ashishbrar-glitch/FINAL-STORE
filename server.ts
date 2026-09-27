@@ -9,6 +9,7 @@ import { initializeApp as initAdminApp, applicationDefault } from "firebase-admi
 import { getFirestore as getAdminFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import fs from "fs";
+import os from "os";
 import { initAIWorker } from "./server/aiWorker.ts";
 
 dotenv.config();
@@ -24,6 +25,20 @@ function getAiClient() {
   return aiClient;
 }
 
+
+// If a service account JSON is provided via env var (e.g. on Railway),
+// write it to a temp file and point GOOGLE_APPLICATION_CREDENTIALS at it
+// so that firebase-admin's applicationDefault() can pick it up.
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const credentialsPath = path.join(os.tmpdir(), "firebase-service-account.json");
+    fs.writeFileSync(credentialsPath, JSON.stringify(serviceAccount));
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+  } catch (e) {
+    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT env variable:", e);
+  }
+}
 
 // Initialize Firebase for server
 let db: any = null;
