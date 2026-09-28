@@ -1,3 +1,5 @@
+import { compressCanvasToBase64 } from './imageProcessor';
+
 export async function autoCropImage(imageSrc: string): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -72,7 +74,13 @@ export async function autoCropImage(imageSrc: string): Promise<string | null> {
         0, 0, croppedWidth, croppedHeight
       );
       
-      resolve(croppedCanvas.toDataURL("image/jpeg", 0.9));
+      const compressedResult = compressCanvasToBase64(croppedCanvas, {
+        maxDimension: 600,
+        targetMaxBytes: 220 * 1024,
+        preserveTransparency: false,
+        preferredQuality: 0.78
+      });
+      resolve(compressedResult);
     };
     img.onerror = () => resolve(null);
     img.src = imageSrc;

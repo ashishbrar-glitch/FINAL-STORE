@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import imageCompression from "browser-image-compression";
 
-import { processImageToBase64 } from '../../lib/imageProcessor';
+import { processImageToBase64, safeValidateProductImageSize } from '../../lib/imageProcessor';
 
 import { BackgroundRemovalPOC } from "./BackgroundRemovalPOC";
 import { AdminProductModal } from "./AdminProductModal";
@@ -216,10 +216,18 @@ export function InventoryManagement() {
       if (imageFile) {
         setUploadStatus("Processing Image (Format neutral)...");
         try {
-          imageUrl = await processImageToBase64(imageFile);
+          imageUrl = await processImageToBase64(imageFile, {
+            maxDimension: 600,
+            targetMaxBytes: 250 * 1024,
+            preserveTransparency: true
+          });
         } catch (error: any) {
           throw new Error("Failed to process image: " + error.message);
         }
+      }
+
+      if (imageUrl && imageUrl.startsWith('data:image')) {
+        imageUrl = await safeValidateProductImageSize(imageUrl);
       }
 
       setUploadStatus("Saving product details...");

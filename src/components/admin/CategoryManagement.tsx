@@ -19,7 +19,7 @@ import {
   Image as ImageIcon,
   Wand2,
 } from "lucide-react";
-import { processImageToBase64 } from '../../lib/imageProcessor';
+import { processImageToBase64, safeValidateProductImageSize } from '../../lib/imageProcessor';
 
 export function CategoryManagement() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -146,8 +146,16 @@ export function CategoryManagement() {
     try {
       let imageUrl = imagePreview || "";
       if (imageFile) {
-        setUploadStatus("Processing Image...");
-        imageUrl = await processImageToBase64(imageFile);
+        setUploadStatus("Processing Image (< 250 KB)...");
+        imageUrl = await processImageToBase64(imageFile, {
+          maxDimension: 600,
+          targetMaxBytes: 250 * 1024,
+          preserveTransparency: true
+        });
+      }
+
+      if (imageUrl && imageUrl.startsWith('data:image')) {
+        imageUrl = await safeValidateProductImageSize(imageUrl);
       }
 
       setUploadStatus("Saving...");

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Check, Loader2, Sparkles, Image as ImageIcon, SlidersHorizontal, Wand2, RefreshCcw, AlertCircle } from 'lucide-react';
 import { db, auth } from '../../lib/firebase';
 import { doc, setDoc, updateDoc, collection, getDoc, getDocs } from 'firebase/firestore';
-import { processImageToBase64 } from '../../lib/imageProcessor';
+import { processImageToBase64, compressCanvasToBase64, safeValidateProductImageSize } from '../../lib/imageProcessor';
 import { pipeline, env } from '@huggingface/transformers';
 import heic2any from 'heic2any';
 
@@ -90,11 +90,8 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
       setOriginalImageFile(file);
       resetAdjustments();
       
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setOriginalPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      // Instant preview using object URL without allocating massive base64 in memory
+      setOriginalPreview(URL.createObjectURL(file));
       
       await processBackgroundRemoval(file);
     }
@@ -218,36 +215,20 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
   const getFinalGeneratedDataUrl = (): string | null => {
     if (!baseTransparentCanvas) return null;
     
-    const MAX_SIZE = 800;
-    let width = baseTransparentCanvas.width;
-    let height = baseTransparentCanvas.height;
-    
-    if (width > height) {
-      if (width > MAX_SIZE) {
-        height = Math.round(height * (MAX_SIZE / width));
-        width = MAX_SIZE;
-      }
-    } else {
-      if (height > MAX_SIZE) {
-        width = Math.round(width * (MAX_SIZE / height));
-        height = MAX_SIZE;
-      }
-    }
-    
     const enhancedCanvas = document.createElement('canvas');
-    enhancedCanvas.width = width;
-    enhancedCanvas.height = height;
+    enhancedCanvas.width = baseTransparentCanvas.width;
+    enhancedCanvas.height = baseTransparentCanvas.height;
     const ctx = enhancedCanvas.getContext('2d')!;
     
     ctx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
-    ctx.drawImage(baseTransparentCanvas, 0, 0, width, height);
+    ctx.drawImage(baseTransparentCanvas, 0, 0);
     
-    let dataUrl = enhancedCanvas.toDataURL('image/webp', 0.8);
-    if (!dataUrl.startsWith('data:image/webp')) {
-      dataUrl = enhancedCanvas.toDataURL('image/png');
-    }
-    
-    return dataUrl;
+    // Auto-compress with strict 250KB limit to avoid Firestore document limits
+    return compressCanvasToBase64(enhancedCanvas, {
+      maxDimension: 600,
+      targetMaxBytes: 250 * 1024,
+      preserveTransparency: true
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent, overrideMode?: "original" | "generated" | "existing") => {
@@ -264,14 +245,25 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
     const mode = overrideMode || submitMode;
     
     try {
-      let finalImageUrl = originalPreview || "";
+      let finalImageUrl = product?.imageUrl || product?.image || "";
       
       if (mode === 'original' && originalImageFile) {
-        setUploadStatus("Compressing Original Image...");
-        finalImageUrl = await processImageToBase64(originalImageFile);
+        setUploadStatus("Compressing Original Image (< 250 KB)...");
+        finalImageUrl = await processImageToBase64(originalImageFile, {
+          maxDimension: 600,
+          targetMaxBytes: 250 * 1024,
+          preserveTransparency: true
+        });
       } else if (mode === 'generated' && baseTransparentCanvas) {
-        setUploadStatus("Saving Generated Image...");
+        setUploadStatus("Compressing Generated Image (< 250 KB)...");
         finalImageUrl = getFinalGeneratedDataUrl() || "";
+      } else if (mode === 'existing') {
+        finalImageUrl = product?.imageUrl || product?.image || "";
+      }
+      
+      // Strict safety check: ensure the image size NEVER exceeds Firestore limits (< 350 KB)
+      if (finalImageUrl && finalImageUrl.startsWith('data:image')) {
+        finalImageUrl = await safeValidateProductImageSize(finalImageUrl);
       }
       
       setUploadStatus("Saving product details...");
