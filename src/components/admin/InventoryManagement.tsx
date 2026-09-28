@@ -20,6 +20,8 @@ import {
   X,
   Download,
   Upload,
+  Search,
+  Sparkles,
 } from "lucide-react";
 import imageCompression from "browser-image-compression";
 
@@ -27,6 +29,37 @@ import { processImageToBase64, safeValidateProductImageSize } from '../../lib/im
 
 import { BackgroundRemovalPOC } from "./BackgroundRemovalPOC";
 import { AdminProductModal } from "./AdminProductModal";
+
+// Helper to determine the creation or update timestamp in milliseconds
+const getProductTime = (p: any): number => {
+  if (p?.createdAt) {
+    if (typeof p.createdAt.toMillis === 'function') return p.createdAt.toMillis();
+    if (typeof p.createdAt.toDate === 'function') return p.createdAt.toDate().getTime();
+    if (p.createdAt instanceof Date) return p.createdAt.getTime();
+    if (typeof p.createdAt === 'number') return p.createdAt;
+    if (typeof p.createdAt === 'string') {
+      const parsed = Date.parse(p.createdAt);
+      if (!isNaN(parsed)) return parsed;
+    }
+    if (p.createdAt?.seconds) return p.createdAt.seconds * 1000;
+  }
+  if (p?.updatedAt) {
+    if (typeof p.updatedAt.toMillis === 'function') return p.updatedAt.toMillis();
+    if (typeof p.updatedAt.toDate === 'function') return p.updatedAt.toDate().getTime();
+    if (p.updatedAt instanceof Date) return p.updatedAt.getTime();
+    if (typeof p.updatedAt === 'number') return p.updatedAt;
+    if (typeof p.updatedAt === 'string') {
+      const parsed = Date.parse(p.updatedAt);
+      if (!isNaN(parsed)) return parsed;
+    }
+    if (p.updatedAt?.seconds) return p.updatedAt.seconds * 1000;
+  }
+  const numId = Number(p?.id);
+  if (!isNaN(numId) && numId > 1500000000000) {
+    return numId;
+  }
+  return 0;
+};
 
 export function InventoryManagement() {
   const [showBGPOC, setShowBGPOC] = useState(false);
@@ -51,6 +84,10 @@ export function InventoryManagement() {
   const [actionLoading, setActionLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Search & Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCatFilter, setSelectedCatFilter] = useState("all");
 
   useEffect(() => {
     const processCategories = (snapshot: any) => {
@@ -80,6 +117,8 @@ export function InventoryManagement() {
 
     const processProducts = (snapshot: any) => {
       const prodList = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+      // Newly added items appear on top (descending order by timestamp)
+      prodList.sort((a: any, b: any) => getProductTime(b) - getProductTime(a));
       setProducts(prodList);
       setLoading(false);
     };
@@ -232,17 +271,23 @@ export function InventoryManagement() {
 
       setUploadStatus("Saving product details...");
       const prodId = editingId || Date.now().toString();
+      const existingProduct = products.find(p => p.id === editingId);
+      const isCreate = !editingId;
+      const nextVersion = isCreate ? 1 : ((Number(existingProduct?.productVersion) || 0) + 1);
+      const finalCategoryId = category || (categories[0]?.id) || 'gro';
 
       const dataToSave: any = {
-        name,
+        name: name.trim(),
         price: Number(price),
-        category,
-        categoryId: category,
+        category: finalCategoryId,
+        categoryId: finalCategoryId,
         imageUrl: imageUrl,
         isActive: true,
         isAvailable: isAvailable,
+        productVersion: nextVersion,
+        updatedAt: new Date(),
       };
-      if (!editingId) {
+      if (isCreate) {
         dataToSave.createdAt = new Date();
       }
 
@@ -275,19 +320,40 @@ export function InventoryManagement() {
     }
   };
 
+  const isRecentlyAdded = (p: any): boolean => {
+    const t = getProductTime(p);
+    if (!t) return false;
+    return Date.now() - t < 24 * 60 * 60 * 1000;
+  };
+
+  const filteredProducts = products.filter((p) => {
+    if (selectedCatFilter !== "all" && (p.categoryId || p.category) !== selectedCatFilter) {
+      return false;
+    }
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    const nameMatch = (p.name || "").toLowerCase().includes(q) || (p.nameHi || "").toLowerCase().includes(q);
+    const catObj = categories.find((c) => c.id === (p.categoryId || p.category));
+    const catMatch = (catObj?.nameEn || catObj?.name || p.category || "").toLowerCase().includes(q);
+    return nameMatch || catMatch;
+  });
+
   if (loading)
     return (
       <div className="p-8 flex justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-[#0e783a]" />
-
-      
-  </div>
+      </div>
     );
 
   return (
     <div id="inventory-section" className="space-y-4 scroll-mt-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">Inventory</h3>
+        <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+          Inventory
+          <span className="text-xs bg-emerald-50 text-[#0e783a] border border-emerald-100 font-semibold px-2 py-0.5 rounded-full">
+            {filteredProducts.length} items
+          </span>
+        </h3>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1 text-sm bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg font-medium cursor-pointer hover:bg-gray-100 transition-colors">
             <Upload className="w-4 h-4" />
@@ -303,12 +369,48 @@ export function InventoryManagement() {
           </button>
           <button
             onClick={() => { setModalProduct(null); setIsModalOpen(true); }}
-            className="flex items-center gap-1 text-sm bg-green-50 text-[#0e783a] px-3 py-1.5 rounded-lg font-medium hover:bg-green-100 transition-colors"
+            className="flex items-center gap-1 text-sm bg-[#0e783a] text-white px-3.5 py-1.5 rounded-lg font-medium hover:bg-[#0c6631] transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
             Add Item
           </button>
         </div>
+      </div>
+
+      {/* Search and Category Filter */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search items by name or category..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0e783a]/20 focus:border-[#0e783a] transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        {categories.length > 0 && (
+          <select
+            value={selectedCatFilter}
+            onChange={(e) => setSelectedCatFilter(e.target.value)}
+            className="bg-gray-50 border border-gray-200 rounded-xl text-sm px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0e783a]/20 focus:border-[#0e783a]"
+          >
+            <option value="all">All Categories</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nameEn || c.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {isModalOpen && (
@@ -321,75 +423,76 @@ export function InventoryManagement() {
       )}
 
       <div className="space-y-3">
-        {products.map((product) => (
-          <div
-            key={product.id}
-            className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3"
-          >
-            <div className="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 overflow-hidden text-2xl border border-gray-100">
-              {product.imageUrl?.startsWith("http") ||
-              product.imageUrl?.startsWith("data:") ? (
-                <img
-                  src={product.imageUrl || undefined}
-                  alt={product.name}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                product.image ||
-                product.imageUrl || (
-                  <Package className="w-6 h-6 text-gray-400" />
-                )
-              )}
-
-      
-  </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 text-sm truncate">
-                {product.name}
-              </p>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[#0e783a] font-bold text-xs">
-                  ₹{product.price}
-                </span>
-                <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
-                  {categories.find(c => c.id === (product.categoryId || product.category))?.nameEn || product.category}
-                </span>
-
-      
-  </div>
-
-      
-  </div>
-            <div className="flex gap-1 shrink-0">
-              <button
-                onClick={() => handleEdit(product)}
-                className="p-2 text-gray-400 hover:text-[#0e783a] bg-gray-50 hover:bg-green-50 rounded-lg transition-colors"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => handleDeleteProduct(product.id)}
-                className="p-2 text-gray-400 hover:text-red-600 bg-gray-50 hover:bg-red-50 rounded-lg transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-
-      
-  </div>
-
-      
-  </div>
-        ))}
-        {products.length === 0 && !loading && (
-          <div className="text-center py-8 text-gray-500 text-sm">
-            No items in inventory.
-
-      
-  </div>
+        {filteredProducts.map((product) => {
+          const isNew = isRecentlyAdded(product);
+          return (
+            <div
+              key={product.id}
+              className={`bg-white p-3 rounded-2xl border shadow-sm flex items-center gap-3 transition-all ${
+                isNew ? "border-emerald-200 bg-emerald-50/15" : "border-gray-100"
+              }`}
+            >
+              <div className="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 overflow-hidden text-2xl border border-gray-100">
+                {product.imageUrl?.startsWith("http") ||
+                product.imageUrl?.startsWith("data:") ? (
+                  <img
+                    src={product.imageUrl || undefined}
+                    alt={product.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  product.image ||
+                  product.imageUrl || (
+                    <Package className="w-6 h-6 text-gray-400" />
+                  )
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="font-semibold text-gray-900 text-sm truncate">
+                    {product.name}
+                  </p>
+                  {isNew && (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/70 border border-emerald-200 px-1.5 py-0.2 rounded-md shrink-0 flex items-center gap-0.5">
+                      <Sparkles className="w-2.5 h-2.5" />
+                      New
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[#0e783a] font-bold text-xs">
+                    ₹{product.price}
+                  </span>
+                  <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md truncate max-w-[140px]">
+                    {categories.find(c => c.id === (product.categoryId || product.category))?.nameEn || product.category}
+                  </span>
+                </div>
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => handleEdit(product)}
+                  className="p-2 text-gray-400 hover:text-[#0e783a] bg-gray-50 hover:bg-green-50 rounded-lg transition-colors"
+                  title="Edit Product"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleDeleteProduct(product.id)}
+                  className="p-2 text-gray-400 hover:text-red-600 bg-gray-50 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Delete Product"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {filteredProducts.length === 0 && !loading && (
+          <div className="text-center py-8 text-gray-500 text-sm bg-gray-50/50 rounded-2xl border border-dashed border-gray-200">
+            {searchQuery ? `No items found matching "${searchQuery}".` : "No items in inventory."}
+          </div>
         )}
-
-      
-  </div>
+      </div>
     
       {deleteConfirmId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

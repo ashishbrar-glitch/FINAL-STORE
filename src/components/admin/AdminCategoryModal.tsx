@@ -1,13 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Check, Loader2, Sparkles, Image as ImageIcon, SlidersHorizontal, Wand2, RefreshCcw, AlertCircle } from 'lucide-react';
 import { db, auth } from '../../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { processImageToBase64, compressCanvasToBase64, safeValidateProductImageSize } from '../../lib/imageProcessor';
-import { pipeline, env } from '@huggingface/transformers';
-import heic2any from 'heic2any';
-
-env.allowLocalModels = false;
-env.backends.onnx.wasm.numThreads = 1;
+import { removeBackgroundSafe } from '../../lib/backgroundRemoval';
 
 interface Props {
   category?: any;
@@ -21,6 +17,18 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(true);
+  const createdPreviewUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (createdPreviewUrlRef.current) {
+        URL.revokeObjectURL(createdPreviewUrlRef.current);
+      }
+    };
+  }, []);
   
   const [nameEn, setNameEn] = useState(category?.nameEn || category?.name || '');
   const [nameHi, setNameHi] = useState(category?.nameHi || category?.name || '');
@@ -82,10 +90,18 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (createdPreviewUrlRef.current) {
+        URL.revokeObjectURL(createdPreviewUrlRef.current);
+      }
+      const previewUrl = URL.createObjectURL(file);
+      createdPreviewUrlRef.current = previewUrl;
+
       setOriginalImageFile(file);
+      setOriginalPreview(previewUrl);
       resetAdjustments();
-      
-      setOriginalPreview(URL.createObjectURL(file));
+      setBaseTransparentCanvas(null);
+      setGeneratedPreview(null);
+      setSubmitMode('original');
       
       await processBackgroundRemoval(file);
     }
@@ -96,134 +112,31 @@ export function AdminCategoryModal({ category, onClose, onSaved }: Props) {
     setCleanStatus("Initializing AI...");
     
     try {
-      let fileToProcess = file;
-      const fileType = file.type || '';
-      const fileName = file.name || '';
-      
-      if (
-        fileType.toLowerCase().includes('heic') || 
-        fileType.toLowerCase().includes('heif') || 
-        fileName.toLowerCase().endsWith('.heic') || 
-        fileName.toLowerCase().endsWith('.heif')
-      ) {
-        setCleanStatus("Converting HEIC format...");
-        try {
-          const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
-          fileToProcess = Array.isArray(converted) ? converted[0] as File : converted as File;
-        } catch (err) {
-          throw new Error("Unable to convert HEIC image. Please upload a JPEG or PNG.");
-        }
-      }
+      const outCanvas = await removeBackgroundSafe(
+        file,
+        (status) => {
+          if (isMountedRef.current) setCleanStatus(status);
+        },
+        () => !isMountedRef.current
+      );
 
-      setCleanStatus("Loading Image...");
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(fileToProcess);
-      });
+      if (!isMountedRef.current) return;
 
-      const segmenter = await pipeline('image-segmentation', 'Xenova/modnet', {
-        progress_callback: (info: any) => {
-          if (info.status === 'downloading') {
-            setCleanStatus(`Downloading AI Model: ${Math.round(info.progress || 0)}%`);
-          } else if (info.status === 'ready') {
-            setCleanStatus("Analyzing pixels...");
-          }
-        }
-      });
-
-      setCleanStatus("Extracting product...");
-      const result = await segmenter(dataUrl);
-      
-      let rawMask: any;
-      if (Array.isArray(result)) {
-        rawMask = result[0].mask || result[0];
-      } else {
-        rawMask = result;
-      }
-      
-      let maskCanvas;
-      if (rawMask.toCanvas) {
-         maskCanvas = rawMask.toCanvas();
-      } else {
-         maskCanvas = document.createElement('canvas');
-         maskCanvas.width = rawMask.width;
-         maskCanvas.height = rawMask.height;
-         const maskCtx = maskCanvas.getContext('2d')!;
-         const imgData = maskCtx.createImageData(rawMask.width, rawMask.height);
-         for (let i = 0; i < rawMask.data.length; i++) {
-             const val = rawMask.channels === 1 ? rawMask.data[i] : rawMask.data[i * 4];
-             imgData.data[i * 4] = val;
-             imgData.data[i * 4 + 1] = val;
-             imgData.data[i * 4 + 2] = val;
-             imgData.data[i * 4 + 3] = 255;
-         }
-         maskCtx.putImageData(imgData, 0, 0);
-      }
-
-      const objectUrl = URL.createObjectURL(fileToProcess);
-      const originalImg = new Image();
-      await new Promise((resolve, reject) => { 
-        originalImg.onload = resolve; 
-        originalImg.onerror = () => reject(new Error("The source image could not be decoded."));
-        originalImg.src = objectUrl;
-      });
-      URL.revokeObjectURL(objectUrl);
-      
-      const outCanvas = document.createElement('canvas');
-      outCanvas.width = originalImg.width;
-      outCanvas.height = originalImg.height;
-      const ctx = outCanvas.getContext('2d')!;
-      
-      const scaledMaskCanvas = document.createElement('canvas');
-      scaledMaskCanvas.width = outCanvas.width;
-      scaledMaskCanvas.height = outCanvas.height;
-      const maskCtx = scaledMaskCanvas.getContext('2d')!;
-      
-      maskCtx.filter = 'blur(1.5px)';
-      maskCtx.drawImage(maskCanvas, 0, 0, outCanvas.width, outCanvas.height);
-      
-      ctx.drawImage(originalImg, 0, 0);
-      
-      const outImgData = ctx.getImageData(0, 0, outCanvas.width, outCanvas.height);
-      const maskImgData = maskCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
-      
-      for (let i = 0; i < outImgData.data.length; i += 4) {
-         outImgData.data[i + 3] = maskImgData.data[i]; 
-      }
-      
-      ctx.putImageData(outImgData, 0, 0);
-      
       setBaseTransparentCanvas(outCanvas);
       setGeneratedPreview(outCanvas.toDataURL('image/png'));
       setImageState('generated');
-      
+      setSubmitMode('generated');
     } catch (err: any) {
-      if (!err?.message?.includes("Unexpected token '<'")) console.error(err);
+      if (!isMountedRef.current) return;
+      console.warn("Category background removal notice:", err?.message || err);
       setImageState('failed');
-      setCleanStatus("Failed to process image.");
+      setCleanStatus("Could not isolate background. You can save original photo.");
+      setSubmitMode('original');
     }
   };
 
   const getFinalGeneratedDataUrl = (): string | null => {
     if (!baseTransparentCanvas) return null;
-    
-    const MAX_SIZE = 800;
-    let width = baseTransparentCanvas.width;
-    let height = baseTransparentCanvas.height;
-    
-    if (width > height) {
-      if (width > MAX_SIZE) {
-        height = Math.round(height * (MAX_SIZE / width));
-        width = MAX_SIZE;
-      }
-    } else {
-      if (height > MAX_SIZE) {
-        width = Math.round(width * (MAX_SIZE / height));
-        height = MAX_SIZE;
-      }
-    }
     
     const enhancedCanvas = document.createElement('canvas');
     enhancedCanvas.width = baseTransparentCanvas.width;

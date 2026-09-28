@@ -1,13 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Upload, Check, Loader2, Sparkles, Image as ImageIcon, SlidersHorizontal, Wand2, RefreshCcw, AlertCircle } from 'lucide-react';
 import { db, auth } from '../../lib/firebase';
-import { doc, setDoc, updateDoc, collection, getDoc, getDocs } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection } from 'firebase/firestore';
 import { processImageToBase64, compressCanvasToBase64, safeValidateProductImageSize } from '../../lib/imageProcessor';
-import { pipeline, env } from '@huggingface/transformers';
-import heic2any from 'heic2any';
-
-env.allowLocalModels = false;
-env.backends.onnx.wasm.numThreads = 1;
+import { removeBackgroundSafe } from '../../lib/backgroundRemoval';
 
 interface Props {
   product?: any;
@@ -22,16 +18,32 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
   const [loading, setLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(true);
+  const createdPreviewUrlRef = useRef<string | null>(null);
   
   const [name, setName] = useState(product?.name || '');
   const [nameHi, setNameHi] = useState(product?.nameHi || '');
   const [nameEn, setNameEn] = useState(product?.nameEn || '');
   const [manualSearchAliases, setManualSearchAliases] = useState((product?.manualSearchAliases || []).join(', '));
-  const [price, setPrice] = useState(product?.price || 0);
+  const [price, setPrice] = useState(product?.price !== undefined ? product.price : '');
   const [category, setCategory] = useState(product?.categoryId || product?.category || '');
   const [isAvailable, setIsAvailable] = useState(product?.isAvailable ?? true);
   const [isBestseller, setIsBestseller] = useState(product?.isBestseller ?? false);
   const [isTranslating, setIsTranslating] = useState(false);
+
+  // Auto-select first category if empty and categories are available
+  useEffect(() => {
+    isMountedRef.current = true;
+    if (!category && categories && categories.length > 0) {
+      setCategory(categories[0].id);
+    }
+    return () => {
+      isMountedRef.current = false;
+      if (createdPreviewUrlRef.current) {
+        URL.revokeObjectURL(createdPreviewUrlRef.current);
+      }
+    };
+  }, [categories, category]);
 
   const handleTranslate = async () => {
     if (!name) return;
@@ -48,14 +60,14 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
       });
       if (!res.ok) throw new Error("Translation failed");
       const data = await res.json();
-      if (data.nameHi) setNameHi(data.nameHi.toUpperCase());
+      if (data.nameHi && isMountedRef.current) setNameHi(data.nameHi.toUpperCase());
     } catch (e: any) {
       if (e.message !== "Failed to fetch" && !e.message?.includes("Unexpected token \'<\'")) {
         console.error(e);
       }
       alert("Failed to auto-translate. Please enter manually.");
     } finally {
-      setIsTranslating(false);
+      if (isMountedRef.current) setIsTranslating(false);
     }
   };
   
@@ -69,7 +81,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
   const [baseTransparentCanvas, setBaseTransparentCanvas] = useState<HTMLCanvasElement | null>(null);
   const [generatedPreview, setGeneratedPreview] = useState<string | null>(null);
 
-    const [submitMode, setSubmitMode] = useState<'original' | 'generated' | 'existing'>('existing');
+  const [submitMode, setSubmitMode] = useState<'original' | 'generated' | 'existing'>('existing');
   const [errorMsg, setErrorMsg] = useState("");
 
   // Adjustments
@@ -82,17 +94,24 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
     setContrast(100);
     setSaturation(100);
   };
-
   
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (createdPreviewUrlRef.current) {
+        URL.revokeObjectURL(createdPreviewUrlRef.current);
+      }
+      const previewUrl = URL.createObjectURL(file);
+      createdPreviewUrlRef.current = previewUrl;
+
       setOriginalImageFile(file);
+      setOriginalPreview(previewUrl);
       resetAdjustments();
+      setBaseTransparentCanvas(null);
+      setGeneratedPreview(null);
+      setSubmitMode('original');
       
-      // Instant preview using object URL without allocating massive base64 in memory
-      setOriginalPreview(URL.createObjectURL(file));
-      
+      // Run background removal safely with pre-downscaling and singleton
       await processBackgroundRemoval(file);
     }
   };
@@ -102,113 +121,26 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
     setCleanStatus("Initializing AI...");
     
     try {
-      let fileToProcess = file;
-      const fileType = file.type || '';
-      const fileName = file.name || '';
-      
-      if (
-        fileType.toLowerCase().includes('heic') || 
-        fileType.toLowerCase().includes('heif') || 
-        fileName.toLowerCase().endsWith('.heic') || 
-        fileName.toLowerCase().endsWith('.heif')
-      ) {
-        setCleanStatus("Converting HEIC format...");
-        try {
-          const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
-          fileToProcess = Array.isArray(converted) ? converted[0] as File : converted as File;
-        } catch (err) {
-          throw new Error("Unable to convert HEIC image. Please upload a JPEG or PNG.");
-        }
-      }
+      const outCanvas = await removeBackgroundSafe(
+        file,
+        (status) => {
+          if (isMountedRef.current) setCleanStatus(status);
+        },
+        () => !isMountedRef.current
+      );
 
-      setCleanStatus("Loading Image...");
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(fileToProcess);
-      });
+      if (!isMountedRef.current) return;
 
-      const segmenter = await pipeline('image-segmentation', 'Xenova/modnet', {
-        progress_callback: (info: any) => {
-          if (info.status === 'downloading') {
-            setCleanStatus(`Downloading AI Model: ${Math.round(info.progress || 0)}%`);
-          } else if (info.status === 'ready') {
-            setCleanStatus("Analyzing pixels...");
-          }
-        }
-      });
-
-      setCleanStatus("Extracting product...");
-      const result = await segmenter(dataUrl);
-      
-      let rawMask: any;
-      if (Array.isArray(result)) {
-        rawMask = result[0].mask || result[0];
-      } else {
-        rawMask = result;
-      }
-      
-      let maskCanvas;
-      if (rawMask.toCanvas) {
-         maskCanvas = rawMask.toCanvas();
-      } else {
-         maskCanvas = document.createElement('canvas');
-         maskCanvas.width = rawMask.width;
-         maskCanvas.height = rawMask.height;
-         const maskCtx = maskCanvas.getContext('2d')!;
-         const imgData = maskCtx.createImageData(rawMask.width, rawMask.height);
-         for (let i = 0; i < rawMask.data.length; i++) {
-             const val = rawMask.channels === 1 ? rawMask.data[i] : rawMask.data[i * 4];
-             imgData.data[i * 4] = val;
-             imgData.data[i * 4 + 1] = val;
-             imgData.data[i * 4 + 2] = val;
-             imgData.data[i * 4 + 3] = 255;
-         }
-         maskCtx.putImageData(imgData, 0, 0);
-      }
-
-      const objectUrl = URL.createObjectURL(fileToProcess);
-      const originalImg = new Image();
-      await new Promise((resolve, reject) => { 
-        originalImg.onload = resolve; 
-        originalImg.onerror = () => reject(new Error("The source image could not be decoded."));
-        originalImg.src = objectUrl;
-      });
-      URL.revokeObjectURL(objectUrl);
-      
-      const outCanvas = document.createElement('canvas');
-      outCanvas.width = originalImg.width;
-      outCanvas.height = originalImg.height;
-      const ctx = outCanvas.getContext('2d')!;
-      
-      const scaledMaskCanvas = document.createElement('canvas');
-      scaledMaskCanvas.width = outCanvas.width;
-      scaledMaskCanvas.height = outCanvas.height;
-      const maskCtx = scaledMaskCanvas.getContext('2d')!;
-      
-      maskCtx.filter = 'blur(1.5px)';
-      maskCtx.drawImage(maskCanvas, 0, 0, outCanvas.width, outCanvas.height);
-      
-      ctx.drawImage(originalImg, 0, 0);
-      
-      const outImgData = ctx.getImageData(0, 0, outCanvas.width, outCanvas.height);
-      const maskImgData = maskCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
-      
-      for (let i = 0; i < outImgData.data.length; i += 4) {
-         outImgData.data[i + 3] = maskImgData.data[i]; 
-      }
-      
-      ctx.putImageData(outImgData, 0, 0);
-      
       setBaseTransparentCanvas(outCanvas);
       setGeneratedPreview(outCanvas.toDataURL('image/png'));
       setImageState('generated');
-      
+      setSubmitMode('generated');
     } catch (err: any) {
-      if (!err?.message?.includes("Unexpected token '<'")) console.error(err);
+      if (!isMountedRef.current) return;
+      console.warn("Background removal notice:", err?.message || err);
       setImageState('failed');
-      setCleanStatus("Failed to process image.");
+      setCleanStatus("Could not isolate background. You can save the original photo directly.");
+      setSubmitMode('original');
     }
   };
 
@@ -235,29 +167,42 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
     e.preventDefault();
     setErrorMsg("");
     
-    if (price === '' || price === null || price === undefined) {
-      setErrorMsg("Please enter a valid price");
+    if (!name.trim()) {
+      setErrorMsg("Please enter a product name");
       return;
     }
+
+    if (price === '' || price === null || price === undefined || isNaN(Number(price))) {
+      setErrorMsg("Please enter a valid numeric price");
+      return;
+    }
+
+    const selectedCategoryId = category || (categories.length > 0 ? categories[0].id : "gro");
     
     setLoading(true);
     setUploadStatus("Starting upload...");
-    const mode = overrideMode || submitMode;
+    
+    // Choose mode: if overrideMode provided, use it; otherwise pick best available
+    const effectiveMode = overrideMode || (
+      originalImageFile 
+        ? (imageState === 'generated' && baseTransparentCanvas ? 'generated' : 'original')
+        : 'existing'
+    );
     
     try {
       let finalImageUrl = product?.imageUrl || product?.image || "";
       
-      if (mode === 'original' && originalImageFile) {
+      if (effectiveMode === 'original' && originalImageFile) {
         setUploadStatus("Compressing Original Image (< 250 KB)...");
         finalImageUrl = await processImageToBase64(originalImageFile, {
           maxDimension: 600,
           targetMaxBytes: 250 * 1024,
           preserveTransparency: true
         });
-      } else if (mode === 'generated' && baseTransparentCanvas) {
+      } else if (effectiveMode === 'generated' && baseTransparentCanvas) {
         setUploadStatus("Compressing Generated Image (< 250 KB)...");
         finalImageUrl = getFinalGeneratedDataUrl() || "";
-      } else if (mode === 'existing') {
+      } else if (effectiveMode === 'existing') {
         finalImageUrl = product?.imageUrl || product?.image || "";
       }
       
@@ -268,64 +213,64 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
       
       setUploadStatus("Saving product details...");
       const productId = product?.id || doc(collection(db, "products")).id;
+      const isCreate = !product?.id;
+      const currentVersion = Number(product?.productVersion) || 0;
+      const nextVersion = isCreate ? 1 : currentVersion + 1;
+
       const dataToSave: any = {
-        name,
+        name: name.trim(),
         price: Number(price),
-        categoryId: category,
-        category: category,
+        categoryId: selectedCategoryId,
+        category: selectedCategoryId,
         image: finalImageUrl,
-          manualSearchAliases: manualSearchAliases.split(',').map(a => a.trim()).filter(a => a.length > 0),
-          productVersion: (product?.productVersion || 0) + 1,
         imageUrl: finalImageUrl,
+        manualSearchAliases: manualSearchAliases.split(',').map(a => a.trim()).filter(a => a.length > 0),
+        productVersion: nextVersion,
         isAvailable,
         isBestseller,
         nameHi: nameHi || product?.nameHi || '',
         nameEn: nameEn || product?.nameEn || '',
-        mrp: product?.mrp || 0,
+        mrp: Number(product?.mrp || 0),
         unit: product?.unit || 'pc',
         isActive: product?.isActive ?? true,
+        updatedAt: new Date()
       };
       
-      if (!product?.id) {
+      if (isCreate) {
         dataToSave.createdAt = new Date();
-      }
-      if (product?.id) {
-        await updateDoc(doc(db, "products", product.id), dataToSave);
-      } else {
         await setDoc(doc(db, "products", productId), dataToSave);
+      } else {
+        await updateDoc(doc(db, "products", productId), dataToSave);
       }
 
-      // Trigger AI asynchronously on the client
-      import('../../lib/firebase').then(async ({ auth, db }) => {
+      // Trigger AI asynchronously on server
+      try {
         const token = await auth.currentUser?.getIdToken();
-        if (!token) return;
-        
-        try {
-           
-           
-           const res = await fetch('/api/process-product', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-              body: JSON.stringify({ productId })
-           });
-           const result = await res.json();
-        } catch (e: any) {
-           if (e.message !== "Failed to fetch" && !e.message?.includes("Unexpected token \'<\'")) {
-              console.error("AI Error:", e);
-           }
+        if (token) {
+          fetch('/api/process-product', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ productId })
+          }).catch(e => console.warn("Background AI enrich ping:", e));
         }
-      });
+      } catch (tokenErr) {
+        console.warn("Could not get idToken for enrichment trigger:", tokenErr);
+      }
       
       setUploadStatus("Success!");
-      setTimeout(() => {
-        onSaved();
-      }, 500);
+      if (isMountedRef.current) {
+        setTimeout(() => {
+          onSaved();
+        }, 300);
+      }
       
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Error saving product: " + (err instanceof Error ? err.message : String(err)));
-      setLoading(false);
-      setUploadStatus("");
+      if (isMountedRef.current) {
+        setErrorMsg("Error saving product: " + (err.message || String(err)));
+        setLoading(false);
+        setUploadStatus("");
+      }
     }
   };
 
@@ -340,7 +285,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
         </div>
         
         <div className="p-5 overflow-y-auto custom-scrollbar">
-          <form onSubmit={(e) => handleSubmit(e, "existing")} className="space-y-6">
+          <form onSubmit={(e) => handleSubmit(e)} className="space-y-6">
             {errorMsg && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl border border-red-100 text-sm font-semibold flex items-center gap-2">
                 <AlertCircle className="w-5 h-5" /> {errorMsg}
@@ -410,7 +355,7 @@ export function AdminProductModal({ product, categories, onClose, onSaved }: Pro
                 >
                   <option value="" disabled>Select Category</option>
                   {categories.map(c => (
-                    <option key={c.id || c.name} value={c.nameEn || c.name}>{c.nameEn || c.name} {c.emoji}</option>
+                    <option key={c.id || c.name} value={c.id || c.name}>{c.nameEn || c.name} {c.emoji || ''}</option>
                   ))}
                 </select>
               </div>
